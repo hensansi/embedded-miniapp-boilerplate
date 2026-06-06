@@ -275,23 +275,28 @@ function AddressPicker({
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
           fontSize: 11,
           fontFamily: "monospace",
           color: value !== connectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
-          background: "var(--line-soft)",
-          border: "1px solid var(--line)",
-          borderRadius: 8,
-          padding: "3px 22px 3px 6px",
+          background: open ? "var(--accent-soft)" : "var(--surface)",
+          border: `1px solid ${open ? "var(--accent-brand)" : "var(--line)"}`,
+          borderRadius: "var(--radius-pill)",
+          padding: "4px 10px 4px 10px",
           cursor: "pointer",
           outline: "none",
           width: "100%",
           textAlign: "left",
-          position: "relative",
-          fontFamily: "monospace",
+          transition: "background 0.15s, border-color 0.15s",
+          whiteSpace: "nowrap",
         }}
       >
-        {label(value)}
-        <span style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", fontSize: 8, color: "var(--muted-text)" }}>▼</span>
+        <span style={{ flex: 1 }}>{label(value)}</span>
+        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+          <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
       </button>
       {open && (
         <div
