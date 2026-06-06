@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import { shortenAddress } from "@/lib/utils";
@@ -239,6 +239,100 @@ function OutlineButton({
     >
       {children}
     </button>
+  );
+}
+
+// ─── Address picker (iframe-safe custom dropdown) ────────────────────────────
+
+function AddressPicker({
+  options,
+  value,
+  connectedAddress,
+  onChange,
+}: {
+  options: string[];
+  value: string;
+  connectedAddress: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const label = (addr: string) =>
+    addr === connectedAddress ? `${shortenAddress(addr, 4)} (connected)` : shortenAddress(addr, 4);
+
+  return (
+    <div ref={ref} style={{ position: "relative", maxWidth: 160 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 11,
+          fontFamily: "monospace",
+          color: value !== connectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
+          background: "var(--line-soft)",
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          padding: "3px 22px 3px 6px",
+          cursor: "pointer",
+          outline: "none",
+          width: "100%",
+          textAlign: "left",
+          position: "relative",
+          fontFamily: "monospace",
+        }}
+      >
+        {label(value)}
+        <span style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", fontSize: 8, color: "var(--muted-text)" }}>▼</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: 4,
+            background: "#fff",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
+            zIndex: 100,
+            minWidth: "100%",
+            overflow: "hidden",
+          }}
+        >
+          {options.map((addr) => (
+            <button
+              key={addr}
+              onClick={() => { onChange(addr); setOpen(false); }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 12px",
+                fontSize: 11,
+                fontFamily: "monospace",
+                background: addr === value ? "var(--accent-soft)" : "transparent",
+                color: addr === value ? "var(--accent-brand)" : "var(--ink)",
+                border: "none",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label(addr)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -618,28 +712,12 @@ function DashboardPage() {
               Total Debt
             </div>
             {allSafes.length > 1 ? (
-              <select
+              <AddressPicker
+                options={allSafes}
                 value={activeAddress ?? ""}
-                onChange={(e) => setSelectedAddress(e.target.value)}
-                style={{
-                  fontSize: 11,
-                  fontFamily: "monospace",
-                  color: selectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
-                  background: "var(--line-soft)",
-                  border: "1px solid var(--line)",
-                  borderRadius: 8,
-                  padding: "3px 6px",
-                  cursor: "pointer",
-                  outline: "none",
-                  maxWidth: 160,
-                }}
-              >
-                {allSafes.map((s) => (
-                  <option key={s} value={s}>
-                    {s === address ? `${shortenAddress(s, 4)} (connected)` : shortenAddress(s, 4)}
-                  </option>
-                ))}
-              </select>
+                connectedAddress={address ?? ""}
+                onChange={setSelectedAddress}
+              />
             ) : (
               <span style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace" }}>
                 {activeAddress ? shortenAddress(activeAddress, 6) : "—"}
