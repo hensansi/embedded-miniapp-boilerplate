@@ -619,20 +619,26 @@ function DashboardPage() {
     const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
 
     async function loadRelatedSafes() {
+      console.log('[aave] connected address:', address);
+
       // Try direct lookup first (works when address is an EOA)
       const direct = await fetch(`${BASE}/owners/${address}/safes/`)
         .then((r) => r.json()).catch(() => ({ safes: [] }));
+      console.log('[aave] direct safes lookup:', direct);
       if (direct.safes?.length) { setOwnedSafes(direct.safes.filter((s: string) => s !== address)); return; }
 
       // Connected address is a Safe — get its owners, then their Safes
       const safeInfo = await fetch(`${BASE}/safes/${address}/`)
         .then((r) => r.json()).catch(() => null);
+      console.log('[aave] safe info:', safeInfo);
       const owners: string[] = safeInfo?.owners ?? [];
       const nested = await Promise.all(
         owners.map((o) => fetch(`${BASE}/owners/${o}/safes/`)
           .then((r) => r.json()).then((d) => d.safes ?? []).catch(() => []))
       );
+      console.log('[aave] nested safes:', nested);
       const related = [...new Set((nested.flat() as string[]).filter((s) => s !== address))];
+      console.log('[aave] related safes:', related);
       setOwnedSafes(related);
     }
 
