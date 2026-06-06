@@ -602,8 +602,8 @@ function DashboardPage() {
             <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)" }}>
               Total Debt
             </div>
-            <span style={{ fontSize: 11, color: "var(--muted-text)", fontFamily: "monospace" }}>
-              {address ? shortenAddress(address, 6) : "—"}
+            <span style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", wordBreak: "break-all" }}>
+              {address ?? "—"}
             </span>
           </div>
           <div
