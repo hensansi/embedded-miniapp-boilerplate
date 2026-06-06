@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
+import { shortenAddress } from "@/lib/utils";
 import {
   fetchAavePosition,
   type AavePosition,
@@ -597,7 +598,14 @@ function DashboardPage() {
       >
         {/* ── Hero card ─────────────────────────────────────────────────── */}
         <Card style={{ padding: "24px" }}>
-          <SectionLabel>Total Debt</SectionLabel>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)" }}>
+              Total Debt
+            </div>
+            <span style={{ fontSize: 11, color: "var(--muted-text)", fontFamily: "monospace" }}>
+              {address ? shortenAddress(address, 6) : "—"}
+            </span>
+          </div>
           <div
             style={{
               fontSize: 36,
