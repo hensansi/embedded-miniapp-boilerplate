@@ -488,29 +488,40 @@ function ActionSheet({
   const asset = sheet.asset;
   const decimals = asset.decimals;
 
-  const maxDisplay = isRepay
-    ? fmtToken((asset as AssetPosition).amount, decimals)
-    : fmtToken((asset as BorrowableAsset).maxAmount, decimals);
+  const maxRaw = isRepay
+    ? (asset as AssetPosition).amount
+    : (asset as BorrowableAsset).maxAmount;
 
   const maxEur = isRepay
     ? (asset as AssetPosition).amountEur
     : (asset as BorrowableAsset).maxAmountEur;
 
   const parsedInput = parseFloat(input) || 0;
-  const eurEquiv = isRepay
-    ? (parsedInput / (asset as AssetPosition).amount) * (asset as AssetPosition).amountEur
-    : (parsedInput / Math.max((asset as BorrowableAsset).maxAmount, 1e-18)) *
-      (asset as BorrowableAsset).maxAmountEur;
+  const eurPerUnit = maxRaw > 0 ? maxEur / maxRaw : 0;
+  const eurEquiv = parsedInput * eurPerUnit;
+
+  // Plain decimal string so number inputs parse it correctly (no locale commas)
+  function toInputStr(n: number): string {
+    const dp = Math.min(decimals, n < 1 ? 6 : n < 1000 ? 4 : 2);
+    return n.toFixed(dp);
+  }
 
   function handleMax() {
-    setInput(maxDisplay);
-    if (isRepay) setIsMax(true);
+    setInput(toInputStr(maxRaw));
+    setIsMax(true);
+  }
+
+  function handleQuick(amount: number) {
+    setInput(String(amount));
+    setIsMax(false);
   }
 
   function handleInputChange(val: string) {
     setInput(val);
     setIsMax(false);
   }
+
+  const quickAmounts = [100, 200, 300].filter((v) => v <= maxRaw);
 
   async function handleConfirm() {
     if (!input && !isMax) return;
@@ -544,8 +555,8 @@ function ActionSheet({
   const canConfirm = (isMax || parsedInput > 0) && !submitting;
   const title = isRepay ? `Repay ${asset.symbol}` : `Borrow ${asset.symbol}`;
   const subtitle = isRepay
-    ? `Current debt: ≈€${fmtEur(maxEur)}`
-    : `Max available: ≈€${fmtEur(maxEur)}`;
+    ? `Current debt: €${fmtEur(maxEur)}`
+    : `Max available: €${fmtEur(maxEur)}`;
 
   return (
     <>
@@ -607,9 +618,31 @@ function ActionSheet({
           </button>
         </div>
 
-        <div style={{ fontSize: 12, color: "var(--muted-text)", marginTop: 6, paddingLeft: 4 }}>
-          ≈ €{fmtEur(isMax ? maxEur : eurEquiv)}
-        </div>
+        {quickAmounts.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            {quickAmounts.map((v) => (
+              <button
+                key={v}
+                onClick={() => handleQuick(v)}
+                style={{
+                  flex: 1,
+                  background: parsedInput === v && !isMax ? "var(--accent-soft)" : "transparent",
+                  color: parsedInput === v && !isMax ? "var(--accent-brand)" : "var(--muted-text)",
+                  border: `1px solid ${parsedInput === v && !isMax ? "var(--accent-brand)" : "var(--line)"}`,
+                  borderRadius: "var(--radius-pill)",
+                  padding: "6px 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "background 0.15s, color 0.15s, border-color 0.15s",
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "0 20px 24px" }}>
