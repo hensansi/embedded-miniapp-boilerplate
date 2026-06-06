@@ -211,7 +211,6 @@ function ProfileView({ data, address }: { data: ProfileResult; address: string }
     <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
       <div className="flex shrink-0 items-center justify-center">
         {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={imageUrl}
             alt={name}
