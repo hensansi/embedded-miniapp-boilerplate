@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWallet } from '@/components/wallet/WalletProvider';
 import { shortenAddress } from '@/lib/utils';
+import { getProfile } from '@/app/server/profile';
+import type { ProfileResult, ProfileLookupResult } from '@/app/server/profile';
 
 type AvatarType =
   | 'CrcV1_Signup'
@@ -16,26 +16,7 @@ type AvatarType =
   | 'CrcV2_RegisterGroup'
   | 'CrcV2_RegisterOrganization';
 
-type RichProfile = {
-  name?: string;
-  description?: string;
-  imageUrl?: string;
-  previewImageUrl?: string;
-  location?: string;
-};
-
-type ProfileResult = {
-  avatarType?: AvatarType;
-  version?: number;
-  cidV0?: string;
-  v2Balance?: string;
-  v1Balance?: string;
-  trustsCount?: number;
-  trustedByCount?: number;
-  profile: RichProfile;
-};
-
-type LookupResult =
+type LookupState =
   | { kind: 'found'; address: string; nonce: number; data: ProfileResult }
   | { kind: 'not-registered'; address: string; nonce: number }
   | { kind: 'error'; address: string; nonce: number; error: string };
@@ -58,7 +39,7 @@ function formatCrc(value: string | undefined): string | null {
 
 export function ProfileLookup() {
   const { address, isConnected } = useWallet();
-  const [result, setResult] = useState<LookupResult | null>(null);
+  const [result, setResult] = useState<LookupState | null>(null);
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
@@ -66,61 +47,18 @@ export function ProfileLookup() {
     let cancelled = false;
 
     (async () => {
-      try {
-        const { Sdk } = await import('@aboutcircles/sdk');
-        const sdk = new Sdk();
-        // `getProfileView` returns avatarInfo + indexed profile + trust stats + balances
-        // in one call, and returns an empty/partial view (rather than throwing) when
-        // the address is not a registered Circles avatar.
-        const view = await sdk.rpc.profile.getProfileView(address as `0x${string}`);
+      const response: ProfileLookupResult = await getProfile({
+        data: { address },
+      });
 
-        if (!view.avatarInfo) {
-          if (cancelled) return;
-          setResult({ kind: 'not-registered', address, nonce });
-          return;
-        }
+      if (cancelled) return;
 
-        // Optionally hydrate richer fields (description, image) from IPFS via the CID.
-        let ipfs: RichProfile = {};
-        if (view.avatarInfo.cidV0) {
-          try {
-            const full = await sdk.rpc.profile.getProfileByCid(view.avatarInfo.cidV0);
-            if (full) ipfs = full as RichProfile;
-          } catch {
-            // The CID may not resolve (deleted, pinning issue); fall through with view data only.
-          }
-        }
-
-        if (cancelled) return;
-        setResult({
-          kind: 'found',
-          address,
-          nonce,
-          data: {
-            avatarType: view.avatarInfo.type as AvatarType,
-            version: view.avatarInfo.version,
-            cidV0: view.avatarInfo.cidV0 || undefined,
-            v2Balance: view.v2Balance,
-            v1Balance: view.v1Balance,
-            trustsCount: view.trustStats?.trustsCount,
-            trustedByCount: view.trustStats?.trustedByCount,
-            profile: {
-              name: ipfs.name ?? view.profile?.name,
-              description: ipfs.description,
-              imageUrl: ipfs.imageUrl,
-              previewImageUrl: ipfs.previewImageUrl,
-              location: ipfs.location,
-            },
-          },
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setResult({
-          kind: 'error',
-          address,
-          nonce,
-          error: err instanceof Error ? err.message : 'Unknown error',
-        });
+      if (response.kind === 'not-registered') {
+        setResult({ kind: 'not-registered', address, nonce });
+      } else if (response.kind === 'error') {
+        setResult({ kind: 'error', address, nonce, error: response.error });
+      } else {
+        setResult({ kind: 'found', address, nonce, data: response.data });
       }
     })();
 
@@ -228,7 +166,7 @@ function ProfileView({ data, address }: { data: ProfileResult; address: string }
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-semibold">{name}</h3>
             {data.avatarType && (
-              <Badge variant="secondary">{TYPE_LABEL[data.avatarType]}</Badge>
+              <Badge variant="secondary">{TYPE_LABEL[data.avatarType as AvatarType]}</Badge>
             )}
             {data.version && <Badge variant="outline">v{data.version}</Badge>}
           </div>
