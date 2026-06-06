@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Link } from '@tanstack/react-router';
 
 import { CirclesLogo } from '@/components/brand/CirclesLogo';
 import { CurrentPage } from '@/components/layout/CurrentPage';
@@ -10,7 +10,7 @@ export function Header() {
     <header className="col-span-full flex h-14 items-center justify-between border-b bg-background px-4">
       <div className="flex items-center gap-2">
         <MobileNav />
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
+        <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <CirclesLogo width={28} height={28} />
           <span className="hidden sm:inline">Miniapp Boilerplate</span>
         </Link>

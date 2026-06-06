@@ -1,14 +1,13 @@
 'use client';
 
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from '@tanstack/react-router';
 
 import { NAV } from '@/lib/nav';
 import { cn } from '@/lib/utils';
 
 export function PageNav() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
 
   const currentIndex = NAV.findIndex((item) =>
     item.href === '/' ? pathname === '/' : pathname.startsWith(item.href),
@@ -52,7 +51,7 @@ function PageNavLink({
   const isNext = direction === 'next';
   return (
     <Link
-      href={href}
+      to={href}
       className={cn(
         'group flex flex-col rounded-lg border p-4 transition-colors hover:bg-accent/40',
         isNext ? 'sm:text-right sm:col-start-2' : '',

@@ -1,7 +1,12 @@
-import { PageNav } from '@/components/layout/PageNav';
-import { ProfileLookup } from '@/components/profile/ProfileLookup';
+import { createFileRoute } from "@tanstack/react-router";
+import { PageNav } from "@/components/layout/PageNav";
+import { ProfileLookup } from "@/components/profile/ProfileLookup";
 
-export default function ProfilePage() {
+export const Route = createFileRoute("/profile")({
+  component: ProfilePage,
+});
+
+function ProfilePage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
       <div>

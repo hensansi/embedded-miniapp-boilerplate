@@ -10,10 +10,11 @@
 !.yarn/releases
 !.yarn/versions
 
-# Next.js
-/.next/
-/out/
-/build
+# TanStack Start / Vite
+/.vinxi/
+/.output/
+/dist
+app.config.timestamp_*.js
 
 # Testing
 /coverage
@@ -32,7 +33,9 @@ yarn-error.log*
 
 # TypeScript
 *.tsbuildinfo
-next-env.d.ts
+
+# TanStack Router generated
+app/routeTree.gen.ts
 
 # Vercel
 .vercel

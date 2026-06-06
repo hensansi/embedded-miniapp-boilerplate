@@ -1,11 +1,11 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { useLocation } from '@tanstack/react-router';
 
 import { NAV } from '@/lib/nav';
 
 export function CurrentPage() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const current = NAV.find((item) =>
     item.href === '/' ? pathname === '/' : pathname.startsWith(item.href),
   );

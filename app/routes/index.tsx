@@ -1,14 +1,19 @@
-import { NavCards } from '@/components/layout/NavCards';
-import { ConnectionCard } from '@/components/wallet/ConnectionCard';
-import { SignInDemo } from '@/components/wallet/SignInDemo';
+import { createFileRoute } from "@tanstack/react-router";
+import { NavCards } from "@/components/layout/NavCards";
+import { ConnectionCard } from "@/components/wallet/ConnectionCard";
+import { SignInDemo } from "@/components/wallet/SignInDemo";
 
-export default function DashboardPage() {
+export const Route = createFileRoute("/")({
+  component: DashboardPage,
+});
+
+function DashboardPage() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
-          A minimal Next.js + shadcn starter for Circles miniapps.
+          A minimal TanStack Start + shadcn starter for Circles miniapps.
         </p>
       </div>
 

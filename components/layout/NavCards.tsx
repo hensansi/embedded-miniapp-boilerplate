@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Link } from '@tanstack/react-router';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -27,7 +27,7 @@ export function NavCards() {
       {ITEMS.map((item) => (
         <Link
           key={item.href}
-          href={item.href}
+          to={item.href}
           className="rounded-xl outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <Card className="h-full transition-colors hover:bg-accent/50">
