@@ -8,10 +8,12 @@ const POOL = '0xb50201558B00496A145fE76f7424749556E326D8' as const;
 const RAY = 10n ** 27n;
 const WAD = 10n ** 18n;
 
-const client = createPublicClient({
+const defaultClient = createPublicClient({
   chain: gnosis,
   transport: http('https://rpc.gnosischain.com'),
 });
+
+type AaveClient = Pick<typeof defaultClient, 'multicall'>;
 
 const UI_ABI = [
   {
@@ -147,8 +149,11 @@ export interface AavePosition {
   healthFactor: number;
 }
 
-export async function fetchAavePosition(user: `0x${string}`): Promise<AavePosition> {
-  const results = await client.multicall({
+export async function fetchAavePosition(
+  user: `0x${string}`,
+  c: AaveClient = defaultClient,
+): Promise<AavePosition> {
+  const results = await c.multicall({
     contracts: [
       {
         address: UI_POOL_DATA_PROVIDER,
@@ -169,22 +174,36 @@ export async function fetchAavePosition(user: `0x${string}`): Promise<AavePositi
         args: [user],
       },
     ],
-    allowFailure: false,
+    allowFailure: true,
   });
 
-  const [reservesRaw, userRaw, accountRaw] = results;
-  const [reserves] = reservesRaw as [typeof reservesRaw[0], unknown];
-  const [userReserves] = userRaw as [typeof userRaw[0], number];
-  const { availableBorrowsBase, healthFactor: hfRaw } =
-    accountRaw as typeof accountRaw & {
-      availableBorrowsBase: bigint;
-      healthFactor: bigint;
-    };
+  const [reservesResult, userResult, accountResult] = results;
+
+  if (reservesResult.status === 'failure') {
+    throw new Error(`Failed to fetch Aave reserve data: ${reservesResult.error}`);
+  }
+
+  const [reserves] = reservesResult.result as [typeof reservesResult.result[0], unknown];
+
+  // getUserReservesData reverts for addresses that have never interacted with Aave
+  const userReserves =
+    userResult.status === 'success' ? (userResult.result as [typeof userResult.result[0], number])[0] : [];
+
+  const maxUint256 = 2n ** 256n - 1n;
+
+  // viem may return multi-output functions as an object OR a tuple array depending
+  // on the code path (allowFailure: true can shift to tuple form). Support both.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const acct: any = accountResult.status === 'success' ? accountResult.result : null;
+  const availableBorrowsBase: bigint = BigInt(
+    acct?.availableBorrowsBase ?? acct?.[2] ?? 0n,
+  );
+  const hfRaw: bigint = BigInt(acct?.healthFactor ?? acct?.[5] ?? maxUint256);
 
   const eureReserve = reserves.find((r) => r.symbol === 'EURe');
-  const eurePriceRaw = eureReserve?.priceInMarketReferenceCurrency ?? 100000000n;
+  const eurePriceRaw = BigInt(eureReserve?.priceInMarketReferenceCurrency ?? 100000000n);
 
-  const toEur = (amountHuman: number, priceRaw: bigint): number => {
+  const toEur = (amountHuman: number, priceRaw: bigint | number): number => {
     if (eurePriceRaw === 0n) return 0;
     return (amountHuman * Number(priceRaw)) / Number(eurePriceRaw);
   };
@@ -201,29 +220,29 @@ export async function fetchAavePosition(user: `0x${string}`): Promise<AavePositi
     if (!reserve) continue;
     const decimals = Number(reserve.decimals);
 
-    if (ur.scaledATokenBalance > 0n) {
-      const raw = (ur.scaledATokenBalance * reserve.liquidityIndex) / RAY;
+    if (BigInt(ur.scaledATokenBalance) > 0n) {
+      const raw = (BigInt(ur.scaledATokenBalance) * BigInt(reserve.liquidityIndex)) / RAY;
       const amount = Number(raw) / 10 ** decimals;
       supplies.push({
         symbol: reserve.symbol,
         address: reserve.underlyingAsset,
         decimals,
         amount,
-        amountEur: toEur(amount, reserve.priceInMarketReferenceCurrency),
+        amountEur: toEur(amount, BigInt(reserve.priceInMarketReferenceCurrency)),
         apy: (Number(reserve.liquidityRate) / Number(RAY)) * 100,
         isStable: false,
       });
     }
 
-    if (ur.scaledVariableDebt > 0n) {
-      const raw = (ur.scaledVariableDebt * reserve.variableBorrowIndex) / RAY;
+    if (BigInt(ur.scaledVariableDebt) > 0n) {
+      const raw = (BigInt(ur.scaledVariableDebt) * BigInt(reserve.variableBorrowIndex)) / RAY;
       const amount = Number(raw) / 10 ** decimals;
       borrows.push({
         symbol: reserve.symbol,
         address: reserve.underlyingAsset,
         decimals,
         amount,
-        amountEur: toEur(amount, reserve.priceInMarketReferenceCurrency),
+        amountEur: toEur(amount, BigInt(reserve.priceInMarketReferenceCurrency)),
         apy: (Number(reserve.variableBorrowRate) / Number(RAY)) * 100,
         isStable: false,
       });
@@ -234,10 +253,10 @@ export async function fetchAavePosition(user: `0x${string}`): Promise<AavePositi
   const availableBorrowsEur =
     eurePriceRaw === 0n
       ? 0
-      : Number(availableBorrowsBase) / Number(eurePriceRaw);
+      : Number(BigInt(availableBorrowsBase)) / Number(eurePriceRaw);
 
-  const maxUint256 = 2n ** 256n - 1n;
-  const healthFactor = hfRaw === maxUint256 ? Infinity : Number(hfRaw) / Number(WAD);
+  const hfBig = BigInt(hfRaw);
+  const healthFactor = hfBig === maxUint256 ? Infinity : Number(hfBig) / Number(WAD);
 
   const borrowable: BorrowableAsset[] = [];
   for (const reserve of reserves) {
@@ -245,15 +264,13 @@ export async function fetchAavePosition(user: `0x${string}`): Promise<AavePositi
       continue;
     }
     const decimals = Number(reserve.decimals);
-    const price = reserve.priceInMarketReferenceCurrency;
+    const price = BigInt(reserve.priceInMarketReferenceCurrency);
     if (price === 0n) continue;
 
-    const maxFromPower =
-      (availableBorrowsBase * 10n ** BigInt(decimals)) / price;
-    const capped =
-      maxFromPower < reserve.availableLiquidity
-        ? maxFromPower
-        : reserve.availableLiquidity;
+    const ab = BigInt(availableBorrowsBase);
+    const maxFromPower = (ab * 10n ** BigInt(decimals)) / price;
+    const liquidity = BigInt(reserve.availableLiquidity);
+    const capped = maxFromPower < liquidity ? maxFromPower : liquidity;
     const maxAmount = Number(capped) / 10 ** decimals;
     if (maxAmount < 0.001) continue;
 
