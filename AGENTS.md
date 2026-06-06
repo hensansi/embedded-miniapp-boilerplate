@@ -1,9 +1,3 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
-
 # Miniapps Boilerplate — Agent Guide
 
 This is a starter template for building [Circles](https://aboutcircles.com) miniapps. A miniapp is a web app that loads inside the Circles host (https://circles.gnosis.io/playground) via an iframe; the host injects a wallet and your app drives interactions through the SDK. The boilerplate ships with the minimum plumbing — wallet provider, sign-in demo, profile lookup, layout — so a developer can clone it and start writing business logic immediately.
@@ -12,52 +6,56 @@ This is a starter template for building [Circles](https://aboutcircles.com) mini
 
 | Layer | Choice | Notes |
 | --- | --- | --- |
-| Framework | **Next.js 16** App Router | Turbopack is the default bundler; routes live at top-level `app/`, not `src/app/` |
-| Language | **TypeScript 5** | Strict mode on; path alias `@/*` → project root |
-| Styling | **Tailwind v4** + **shadcn/ui** | shadcn uses Base UI under the hood (`@base-ui/react`), not Radix. There is no `tailwind.config.js` — theme tokens live in `app/globals.css` under `@theme inline { … }` |
+| Framework | **TanStack Start** + **TanStack Router** | Vite-based SSR; file-based routing in `app/routes/` |
+| Language | **TypeScript 6** | Strict mode on; path alias `@/*` → project root |
+| Styling | **Tailwind v4** + **shadcn/ui** | shadcn uses Base UI (`@base-ui/react`), not Radix. No `tailwind.config.js` — theme tokens live in `app/globals.css` under `@theme inline { … }` |
 | Package manager | **pnpm** | Lock at `pnpm-lock.yaml`; never mix with npm/yarn |
-| Theme | Light only | The `.dark { … }` CSS block and `@custom-variant dark` directive were intentionally removed. Do not add `dark:` Tailwind variants unless the user explicitly asks for dark mode |
+| Theme | Light only | No `.dark { … }` block. Do not add `dark:` Tailwind variants unless explicitly asked |
 | Circles SDKs | `@aboutcircles/miniapp-sdk` + `@aboutcircles/sdk` | See "Working with the Circles SDKs" below |
 
 ## Project structure
 
 ```
 app/
-  layout.tsx                    Root: <WalletProvider><AppShell>{children}
-  page.tsx                      Dashboard (ConnectionCard + SignInDemo + NavCards)
-  profile/page.tsx              Profile lookup
-  actions/page.tsx              sendTransactions code sample
-  globals.css                   Tailwind v4 + shadcn tokens (light only)
-  icon.svg                      Favicon (Circles brand glyph)
+  routes/
+    __root.tsx              Root layout: CSP header + <WalletProvider><AppShell>
+    index.tsx               Dashboard (ConnectionCard + SignInDemo + NavCards)
+    profile.tsx             Profile lookup
+    actions.tsx             sendTransactions code sample
+  routeTree.gen.ts          Auto-generated — do not edit by hand
+  router.tsx                createRouter() wired to routeTree.gen.ts
+  start.ts                  TanStack Start entry + CSP middleware
+  globals.css               Tailwind v4 + shadcn tokens (light only)
+  server/
+    profile.ts              createServerFn example (profile lookup)
 components/
-  brand/CirclesLogo.tsx         Inline-SVG brand mark
+  brand/CirclesLogo.tsx     Inline-SVG brand mark
   layout/
-    AppShell.tsx                Grid: header (col-span-full) + sidebar (md+) + main
-    Header.tsx                  Logo, current-page crumb, MobileNav, WalletStatus
-    Sidebar.tsx                 Desktop nav (md+), driven by lib/nav.ts
-    MobileNav.tsx               Hamburger + Sheet drawer (below md)
-    CurrentPage.tsx             "/ Dashboard" crumb in header
-    NavCards.tsx                Dashboard's link-cards to /profile and /actions
-    PageNav.tsx                 Prev/next sibling navigation at bottom of sub-pages
+    AppShell.tsx            Grid: header + sidebar (md+) + main
+    Header.tsx              Logo, crumb, MobileNav, WalletStatus
+    Sidebar.tsx             Desktop nav (md+), driven by lib/nav.ts
+    MobileNav.tsx           Hamburger + Sheet drawer (below md)
+    CurrentPage.tsx         Page crumb in header
+    NavCards.tsx            Dashboard link-cards
+    PageNav.tsx             Prev/next sibling nav at bottom of sub-pages
   wallet/
-    WalletProvider.tsx          Client context, subscribes to onWalletChange
-    WalletStatus.tsx            Badge with shortened address
-    ConnectionCard.tsx          Full connection details card
-    SignInDemo.tsx              signMessage() demo
+    WalletProvider.tsx      Client context + useWallet hook, subscribes to onWalletChange
+    WalletStatus.tsx        Badge with shortened address
+    ConnectionCard.tsx      Full connection details card
+    SignInDemo.tsx          signMessage() demo
   profile/
-    ProfileLookup.tsx           Profile lookup via getProfileView + getProfileByCid
-  ui/                           shadcn primitives — DO NOT hand-edit; regenerate via the CLI
+    ProfileLookup.tsx       Profile lookup via getProfile server function
+  ui/                       shadcn primitives — DO NOT hand-edit; regenerate via CLI
 hooks/
-  use-wallet.ts                 Re-export of useWallet
+  use-wallet.ts             Re-export of useWallet
 lib/
-  utils.ts                      cn() + shortenAddress(addr, chars=4)
-  nav.ts                        NAV array — single source of truth for the sidebar/drawer/page-nav
-next.config.ts                  CSP frame-ancestors header for the Circles playground iframe
+  utils.ts                  cn() + shortenAddress(addr, chars=4)
+  nav.ts                    NAV array — single source of truth for sidebar/drawer/page-nav
 ```
 
 ## Working with the Circles SDKs
 
-There are two packages, and they serve different purposes. Get this wrong and the app will silently misbehave.
+There are two packages with distinct roles. Get this wrong and the app will silently misbehave.
 
 ### `@aboutcircles/miniapp-sdk` — host bridge
 
@@ -74,9 +72,9 @@ import {
 ```
 
 **Rules:**
-- **There is no "Connect" button.** The host pushes the wallet via `onWalletChange`. If you find yourself adding a connect button, you are working around the wrong problem. Outside the host (standalone `pnpm dev`), the callback never fires — the "Not connected" state is *expected*, not a bug.
-- **The SDK touches `window` and `parent`.** It must be dynamically imported inside a client component's `useEffect`. **Never** top-level import it from a server component or a top-level module — you will see `window is not defined` at build time. See `WalletProvider.tsx` for the canonical pattern (`import('@aboutcircles/miniapp-sdk').then(({ onWalletChange }) => …)`).
-- **`onWalletChange` returns an unsubscribe function.** Capture it and call it in the effect's cleanup, or you will leak subscriptions on hot reload.
+- **There is no "Connect" button.** The host pushes the wallet via `onWalletChange`. Outside the host (`pnpm dev` standalone), the callback never fires — the "Not connected" state is expected, not a bug.
+- **The SDK touches `window` and `parent`.** Dynamically import it inside a `useEffect`. Never top-level import it — you will get `window is not defined` at SSR time. See `WalletProvider.tsx` for the canonical pattern.
+- **`onWalletChange` returns an unsubscribe function.** Call it in the effect cleanup or you will leak subscriptions on hot reload.
 
 ### `@aboutcircles/sdk` — read/write Circles data
 
@@ -90,7 +88,6 @@ const sdk = new Sdk();
 const view = await sdk.rpc.profile.getProfileView(address);
 // → { avatarInfo?, profile?, trustStats, v2Balance?, v1Balance? }
 if (view.avatarInfo) {
-  // address is a Circles avatar — render
   if (view.avatarInfo.cidV0) {
     const full = await sdk.rpc.profile.getProfileByCid(view.avatarInfo.cidV0);
     // → richer Profile { name, description, imageUrl, previewImageUrl, location }
@@ -99,43 +96,38 @@ if (view.avatarInfo) {
   // not registered — show a friendly message, don't treat as an error
 }
 
-// ❌ Wrong — wraps everything in try/catch and throws "Avatar not found"
-// even on valid avatars whose on-chain cidV0Digest is empty.
+// ❌ Wrong — throws "Avatar not found" even on valid avatars with empty cidV0Digest
 const avatar = await sdk.getAvatar(address);
 const profile = await avatar.profile.get();
 ```
 
-`sdk.getAvatar()` is the right call when you need a write-capable `Avatar` instance to call `trust.add`, `transfer.direct`, `personalToken.mint`, etc. Reserve it for those cases — never for read-only lookups.
+Use `sdk.getAvatar()` only when you need a write-capable `Avatar` instance (`trust.add`, `transfer.direct`, `personalToken.mint`, etc.). Never for reads.
 
-**Balance formatting:** `view.v2Balance` is already a decimal CRC string (e.g. `"1219.71…"`), **not** atto-CRC. Don't divide it by `1e18`.
+**Balance formatting:** `view.v2Balance` is already a decimal CRC string (e.g. `"1219.71…"`). Do not divide by `1e18`.
 
 ### Default RPC endpoint
 
-`new Sdk()` defaults to Gnosis Chain mainnet via `https://rpc.aboutcircles.com/`. No configuration is required for the boilerplate.
+`new Sdk()` defaults to Gnosis Chain mainnet via `https://rpc.aboutcircles.com/`. No configuration needed.
 
 ## Wallet context
 
-[`components/wallet/WalletProvider.tsx`](components/wallet/WalletProvider.tsx) wraps `onWalletChange` in a React context. It is mounted once in [`app/layout.tsx`](app/layout.tsx). Anywhere downstream:
+`WalletProvider.tsx` wraps `onWalletChange` in a React context and is mounted once in `app/routes/__root.tsx`. Anywhere downstream:
 
 ```tsx
-'use client';
 import { useWallet } from '@/hooks/use-wallet';
 
 const { address, isConnected, isMiniappHost } = useWallet();
 ```
 
-- `address: string | null` — checksummed or lowercased per the host; treat as opaque
+- `address: string | null` — treat as opaque; checksumming varies by host
 - `isConnected: boolean` — `!!address`
-- `isMiniappHost: boolean` — `true` only when running inside the Circles iframe; useful for showing "open in Circles" hints during standalone dev
-
-`useWallet()` must be called from a `'use client'` component.
+- `isMiniappHost: boolean` — `true` only inside the Circles iframe
 
 ## Navigation
 
-The sidebar, mobile drawer, current-page crumb, and prev/next page nav are all driven by a single source — [`lib/nav.ts`](lib/nav.ts). To add a route, edit `NAV` and create `app/<route>/page.tsx`. To reorder how prev/next links flow, reorder `NAV`.
+The sidebar, mobile drawer, crumb, and prev/next page nav are all driven by one source — [`lib/nav.ts`](lib/nav.ts). To add a route, edit `NAV` and create `app/routes/<route>.tsx`.
 
 ```ts
-// lib/nav.ts
 export const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/profile', label: 'Profile' },
@@ -143,42 +135,69 @@ export const NAV: NavItem[] = [
 ];
 ```
 
-The dashboard (`/`) intentionally has no `<PageNav />` because [`NavCards`](components/layout/NavCards.tsx) above it serves the same purpose. Sub-pages include `<PageNav />` at the bottom for sequential navigation.
+The dashboard (`/`) intentionally has no `<PageNav />` — `NavCards` serves that purpose. Sub-pages include `<PageNav />` at the bottom.
+
+## Routing
+
+Routes use TanStack Router's file-based convention. Each route file exports a `Route` constant:
+
+```tsx
+// app/routes/my-page.tsx
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/my-page')({
+  component: MyPage,
+});
+
+function MyPage() { … }
+```
+
+After adding or renaming a route file, run `pnpm generate-routes` to regenerate `app/routeTree.gen.ts`. The dev server does this automatically on file changes, but the build does not.
+
+## Server functions
+
+Use `createServerFn` from `@tanstack/react-start` for server-side logic (database calls, SDK reads that shouldn't run in the browser, etc.). See `app/server/profile.ts` for the pattern.
+
+```ts
+import { createServerFn } from '@tanstack/react-start';
+
+export const myFn = createServerFn({ method: 'GET' })
+  .inputValidator((input: { foo: string }) => input)
+  .handler(async ({ data }) => {
+    // runs on server only
+  });
+```
+
+Call it from a component like a regular async function — TanStack Start handles the serialization.
 
 ## Styling
 
 - **Tailwind v4.** `app/globals.css` imports `tailwindcss` and `shadcn/tailwind.css` and defines tokens under `@theme inline { … }`. There is no `tailwind.config.js`.
-- **shadcn primitives** in `components/ui/`. **Do not hand-edit** them — they are CLI-generated. To update a component, regenerate it with `pnpm dlx shadcn@latest add <name> --overwrite`.
+- **shadcn primitives** in `components/ui/`. Do not hand-edit them. Regenerate with `pnpm dlx shadcn@latest add <name> --overwrite`.
 - **shadcn uses Base UI** (`@base-ui/react`), not Radix. Trigger components accept a `render={<Button … />}` prop, not `asChild`. See `MobileNav.tsx` for an example.
-- **Light mode only.** The `.dark { … }` CSS block was deleted from `globals.css` and the `@custom-variant dark` directive was removed. Do not write `dark:` variants. To re-enable dark mode, restore both, add `next-themes`, and ship a theme toggle.
+- **Light mode only.** Do not write `dark:` variants.
 
 ## Common workflows
 
 ### Add a new route
 
-1. Create `app/<route>/page.tsx`. Server component by default; only add `'use client'` if you use hooks/state/event handlers.
-2. Add `{ href: '/<route>', label: '…' }` to `NAV` in `lib/nav.ts`.
-3. Add `<PageNav />` at the bottom of the page (after main content). Skip on routes that already have a richer "where to go next" affordance.
+1. Create `app/routes/<name>.tsx` with `createFileRoute('/<name>')`.
+2. Add `{ href: '/<name>', label: '…' }` to `NAV` in `lib/nav.ts`.
+3. Add `<PageNav />` at the bottom unless the page has its own navigation affordance.
+4. Run `pnpm generate-routes` if the dev server isn't running.
 
 ### Add a shadcn component
 
 ```bash
-pnpm dlx shadcn@latest add <name>          # e.g. dialog, tabs, dropdown-menu
+pnpm dlx shadcn@latest add <name>
 ```
-
-Components land in `components/ui/`. They use Base UI primitives, not Radix.
 
 ### Add a Circles SDK call
 
-1. Read the typed signature in `node_modules/@aboutcircles/sdk/dist/**/*.d.ts` — the bundled JS is minified but the `.d.ts` files are readable.
-2. Dynamically import inside a client component's `useEffect`:
-   ```ts
-   const { Sdk } = await import('@aboutcircles/sdk');
-   const sdk = new Sdk();
-   const result = await sdk.rpc.<area>.<method>(…);
-   ```
-3. Handle the unregistered/empty case explicitly; most addresses are not Circles avatars and the SDK signals that with `undefined`, not exceptions (for `getProfileView`).
-4. Probe new methods against the live RPC before wiring UI:
+1. Read the typed signature in `node_modules/@aboutcircles/sdk/dist/**/*.d.ts`.
+2. For client-side calls, dynamically import inside a `useEffect`. For server-side calls, use a `createServerFn`.
+3. Handle the unregistered case explicitly — `getProfileView` returns `{ avatarInfo: undefined }`, not an error.
+4. Probe unfamiliar RPC methods before wiring UI:
    ```bash
    curl -s -X POST https://rpc.aboutcircles.com/ -H "Content-Type: application/json" \
      -d '{"jsonrpc":"2.0","id":1,"method":"circles_<method>","params":[…]}'
@@ -187,35 +206,31 @@ Components land in `components/ui/`. They use Base UI primitives, not Radix.
 ## Commands
 
 ```bash
-pnpm dev          # http://localhost:3000
-pnpm build        # production build (Turbopack)
-pnpm start        # run the built app
-pnpm lint         # ESLint (the script is just `eslint`; `next lint` is removed in 16)
+pnpm dev              # http://localhost:3000
+pnpm build            # production build (Vite + Nitro)
+pnpm start            # run the built app
+pnpm lint             # ESLint
+pnpm generate-routes  # regenerate app/routeTree.gen.ts
 ```
-
-There is no test suite yet. If you add one, the conventional script name is `pnpm test`.
 
 ## Running inside the Circles playground
 
-The host iframes any HTTPS URL pasted into https://circles.gnosis.io/playground. To test:
-
 1. Deploy to Vercel (or any HTTPS host).
 2. Open `https://circles.gnosis.io/playground?url=<your-deploy-url>`.
-3. The host injects a Safe address. `onWalletChange` fires, the badge flips, `signMessage` and `sendTransactions` start working.
+3. The host injects a Safe address. `onWalletChange` fires, the badge flips, and `signMessage`/`sendTransactions` start working.
 
-[`next.config.ts`](next.config.ts) ships a `Content-Security-Policy: frame-ancestors 'self' https://circles.gnosis.io https://*.vercel.app;` header so the iframe can load. If you deploy to a different domain, add it to the allowlist.
+The CSP `frame-ancestors` header is set in `app/start.ts` middleware. If you deploy to a domain outside `*.gnosis.io` and `*.vercel.app`, add it to the allowlist there.
 
 For permanent marketplace placement, open a PR against [`aboutcircles/CirclesMiniapps`](https://github.com/aboutcircles/CirclesMiniapps) adding an entry to `static/miniapps.json`.
 
 ## Gotchas — read before changing things
 
 - **Do not add a "Connect wallet" button.** The host is the wallet UI.
-- **Do not top-level import either Circles SDK** from a server component or page file. Always dynamically import inside a client `useEffect`.
-- **Do not use `sdk.getAvatar()` for read flows** — use `sdk.rpc.profile.getProfileView()`. The former silently masks errors as "Avatar not found".
+- **Do not top-level import either Circles SDK.** Always dynamically import inside a `useEffect` or a `createServerFn` handler.
+- **Do not use `sdk.getAvatar()` for read flows** — use `sdk.rpc.profile.getProfileView()`.
 - **Do not divide `v2Balance` by `1e18`** — it is already a decimal string.
 - **Do not hand-edit `components/ui/*`** — regenerate via the shadcn CLI.
-- **Do not add `dark:` Tailwind variants** unless the user explicitly opts into dark mode.
-- **Do not edit `next-env.d.ts`** — it is regenerated on every build.
-- **Do not run `next lint`** — Next 16 removed that CLI; use the `pnpm lint` script which invokes `eslint` directly.
-- **Do not run `pnpm dev` in the background without need.** Stop it when done; orphaned dev servers eat ports and confuse the next run. Use `pkill -f "next dev"` to clean up.
-- **Do not commit `.env`** — only `.env.example` is tracked. The `.gitignore` rule `.env*.local` plus `.env` enforces this.
+- **Do not edit `app/routeTree.gen.ts`** — it is auto-generated by TanStack Router.
+- **Do not add `dark:` Tailwind variants** unless dark mode is explicitly requested.
+- **Do not run `pnpm dev` in the background without need.** Use `pkill -f "vite"` to clean up orphaned servers.
+- **Do not commit `.env.local`** — only `.env.example` is tracked.
