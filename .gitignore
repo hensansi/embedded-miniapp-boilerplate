@@ -13,6 +13,7 @@
 # TanStack Start / Vite
 /.vinxi/
 /.output/
+/.tanstack/
 /dist
 app.config.timestamp_*.js
 
