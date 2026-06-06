@@ -688,35 +688,51 @@ function DashboardPage() {
     const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
 
     async function loadRelatedSafes() {
-      // Try direct lookup first (works when address is an EOA)
-      const direct = await fetch(`${BASE}/owners/${address}/safes/`)
-        .then((r) => r.json()).catch(() => ({ safes: [] }));
-      if (direct.safes?.length) { setOwnedSafes(direct.safes.filter((s: string) => s !== address)); return; }
+      const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-      // Connected address is a Safe — get its owners
+      // Get connected Safe's owners
       const safeInfo = await fetch(`${BASE}/safes/${address}/`)
         .then((r) => r.json()).catch(() => null);
       const owners: string[] = safeInfo?.owners ?? [];
 
-      // Filter to EOA owners only: a Safe owner returns valid JSON from /safes/{addr}/,
-      // an EOA returns 404 or fails. We only want passkey EOAs, not co-signer Safes.
-      const eoaOwners: string[] = [];
+      const candidates = new Set<string>();
+
       for (const owner of owners) {
+        await pause(150);
+
+        // Skip if owner is itself a Safe
         const isSafe = await fetch(`${BASE}/safes/${owner}/`)
           .then((r) => r.ok).catch(() => false);
-        if (!isSafe) eoaOwners.push(owner);
-      }
+        if (isSafe) continue;
 
-      // Get all safes owned by the passkey EOA(s)
-      const related = new Set<string>();
-      for (const eoa of eoaOwners) {
-        const res = await fetch(`${BASE}/owners/${eoa}/safes/`)
+        await pause(150);
+
+        // Get safes owned by this EOA
+        const res = await fetch(`${BASE}/owners/${owner}/safes/`)
           .then((r) => r.json()).catch(() => ({ safes: [] }));
-        for (const s of (res.safes ?? []) as string[]) {
-          if (s !== address) related.add(s);
+        const safes: string[] = res.safes ?? [];
+
+        // Skip protocol/relayer addresses — a personal passkey owns at most a handful
+        if (safes.length > 10) continue;
+
+        for (const s of safes) {
+          if (s !== address) candidates.add(s);
         }
       }
-      setOwnedSafes([...related]);
+
+      // Keep only addresses registered in the Circles protocol
+      const circlesSafes: string[] = [];
+      for (const s of candidates) {
+        await pause(100);
+        const view = await fetch('https://rpc.aboutcircles.com/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'circles_getProfileView', params: [s] }),
+        }).then((r) => r.json()).catch(() => null);
+        if (view?.result?.avatarInfo) circlesSafes.push(s);
+      }
+
+      setOwnedSafes(circlesSafes);
     }
 
     loadRelatedSafes();
