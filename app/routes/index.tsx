@@ -267,13 +267,14 @@ function AddressPicker({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  const canSwitch = options.length > 1;
   const label = (addr: string) =>
     addr === connectedAddress ? `${shortenAddress(addr, 4)} (connected)` : shortenAddress(addr, 4);
 
   return (
     <div ref={ref} style={{ position: "relative", maxWidth: 160 }}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => canSwitch && setOpen((v) => !v)}
         style={{
           display: "flex",
           alignItems: "center",
@@ -284,8 +285,8 @@ function AddressPicker({
           background: open ? "var(--accent-soft)" : "var(--surface)",
           border: `1px solid ${open ? "var(--accent-brand)" : "var(--line)"}`,
           borderRadius: "var(--radius-pill)",
-          padding: "4px 10px 4px 10px",
-          cursor: "pointer",
+          padding: "4px 10px",
+          cursor: canSwitch ? "pointer" : "default",
           outline: "none",
           width: "100%",
           textAlign: "left",
@@ -294,9 +295,11 @@ function AddressPicker({
         }}
       >
         <span style={{ flex: 1 }}>{label(value)}</span>
-        <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-          <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
+        {canSwitch && (
+          <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+            <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
       </button>
       {open && (
         <div
@@ -716,17 +719,13 @@ function DashboardPage() {
             <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", flexShrink: 0 }}>
               Total Debt
             </div>
-            {allSafes.length > 1 ? (
+            {activeAddress && (
               <AddressPicker
-                options={allSafes}
-                value={activeAddress ?? ""}
+                options={allSafes.length ? allSafes : [activeAddress]}
+                value={activeAddress}
                 connectedAddress={address ?? ""}
                 onChange={setSelectedAddress}
               />
-            ) : (
-              <span style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace" }}>
-                {activeAddress ? shortenAddress(activeAddress, 6) : "—"}
-              </span>
             )}
           </div>
           <div
