@@ -501,15 +501,23 @@ function ActionSheet({
 
 function DashboardPage() {
   const { address, isConnected } = useWallet();
-  const [overrideInput, setOverrideInput] = useState("");
-  const [overrideAddress, setOverrideAddress] = useState<string | null>(null);
-  const [editingAddress, setEditingAddress] = useState(false);
+  const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
 
-  const activeAddress = overrideAddress ?? address;
+  const activeAddress = selectedAddress ?? address;
+
+  useEffect(() => {
+    if (!address) return;
+    setSelectedAddress(null);
+    fetch(`https://api.safe.global/tx-service/gno/api/v1/owners/${address}/safes/`)
+      .then((r) => r.json())
+      .then((d) => setOwnedSafes(d.safes ?? []))
+      .catch(() => {});
+  }, [address]);
 
   const loadPosition = useCallback(async () => {
     if (!activeAddress) return;
@@ -529,19 +537,7 @@ function DashboardPage() {
     loadPosition();
   }, [loadPosition]);
 
-  function applyOverride() {
-    const val = overrideInput.trim();
-    if (val.startsWith("0x") && val.length === 42) {
-      setOverrideAddress(val);
-    }
-    setEditingAddress(false);
-  }
-
-  function resetOverride() {
-    setOverrideAddress(null);
-    setOverrideInput("");
-    setEditingAddress(false);
-  }
+  const allSafes = address ? [address, ...ownedSafes] : [];
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -617,35 +613,37 @@ function DashboardPage() {
       >
         {/* ── Hero card ─────────────────────────────────────────────────── */}
         <Card style={{ padding: "24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", flexShrink: 0 }}>
               Total Debt
             </div>
-            {editingAddress ? (
-              <div style={{ display: "flex", gap: 6, flex: 1, minWidth: 0 }}>
-                <input
-                  autoFocus
-                  value={overrideInput}
-                  onChange={(e) => setOverrideInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") applyOverride(); if (e.key === "Escape") setEditingAddress(false); }}
-                  placeholder="0x…"
-                  style={{ flex: 1, fontSize: 11, fontFamily: "monospace", border: "1px solid var(--line)", borderRadius: 8, padding: "4px 8px", outline: "none", minWidth: 0, color: "var(--ink)" }}
-                />
-                <button onClick={applyOverride} style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-brand)", background: "none", border: "none", cursor: "pointer", padding: "4px 2px", fontFamily: "inherit" }}>Go</button>
-                <button onClick={() => setEditingAddress(false)} style={{ fontSize: 11, color: "var(--muted-text)", background: "none", border: "none", cursor: "pointer", padding: "4px 2px", fontFamily: "inherit" }}>✕</button>
-              </div>
+            {allSafes.length > 1 ? (
+              <select
+                value={activeAddress ?? ""}
+                onChange={(e) => setSelectedAddress(e.target.value)}
+                style={{
+                  fontSize: 11,
+                  fontFamily: "monospace",
+                  color: selectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
+                  background: "var(--line-soft)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 8,
+                  padding: "3px 6px",
+                  cursor: "pointer",
+                  outline: "none",
+                  maxWidth: 160,
+                }}
+              >
+                {allSafes.map((s) => (
+                  <option key={s} value={s}>
+                    {s === address ? `${shortenAddress(s, 4)} (connected)` : shortenAddress(s, 4)}
+                  </option>
+                ))}
+              </select>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {overrideAddress && (
-                  <button onClick={resetOverride} style={{ fontSize: 10, color: "var(--muted-text)", background: "var(--line-soft)", border: "none", borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>reset</button>
-                )}
-                <span
-                  onClick={() => { setOverrideInput(activeAddress ?? ""); setEditingAddress(true); }}
-                  style={{ fontSize: 10, color: overrideAddress ? "var(--accent-brand)" : "var(--muted-text)", fontFamily: "monospace", cursor: "pointer", wordBreak: "break-all", textAlign: "right" }}
-                >
-                  {activeAddress ? shortenAddress(activeAddress, 6) : "—"}
-                </span>
-              </div>
+              <span style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace" }}>
+                {activeAddress ? shortenAddress(activeAddress, 6) : "—"}
+              </span>
             )}
           </div>
           <div
