@@ -404,7 +404,7 @@ function BorrowTile({
             {asset.symbol}
           </div>
           <div style={{ fontSize: 12, color: "var(--muted-text)" }}>
-            up to €{fmtEur(asset.maxAmountEur)}
+            up to {fmtToken(asset.maxAmount, asset.decimals)} EURe
           </div>
         </div>
       </div>
@@ -800,27 +800,19 @@ function DashboardPage() {
         {/* ── Available to borrow ───────────────────────────────────────── */}
         <div>
           <SectionLabel>Available to Borrow</SectionLabel>
-          {position.borrowable.length === 0 ? (
-            <div style={{ color: "var(--muted-text)", fontSize: 14 }}>
-              Nothing available
-            </div>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, 1fr)",
-                gap: 12,
-              }}
-            >
-              {position.borrowable.map((a) => (
-                <BorrowTile
-                  key={a.address}
-                  asset={a}
-                  onBorrow={() => setSheet({ type: "borrow", asset: a })}
-                />
-              ))}
-            </div>
-          )}
+          {(() => {
+            const eure = position.borrowable.find((a) => a.symbol === "EURe");
+            return eure ? (
+              <BorrowTile
+                asset={eure}
+                onBorrow={() => setSheet({ type: "borrow", asset: eure })}
+              />
+            ) : (
+              <div style={{ color: "var(--muted-text)", fontSize: 14 }}>
+                Nothing available
+              </div>
+            );
+          })()}
         </div>
       </div>
 
