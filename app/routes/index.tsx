@@ -645,6 +645,43 @@ function ActionSheet({
         )}
       </div>
 
+      {canConfirm && (
+        <div style={{ padding: "0 20px 12px" }}>
+          <div
+            style={{
+              background: "var(--accent-soft)",
+              borderRadius: 12,
+              padding: "12px 14px",
+              fontSize: 12,
+              color: "var(--muted-text)",
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: "var(--ink)", marginBottom: 4, fontSize: 13 }}>
+              You are {isRepay ? "repaying" : "borrowing"}{" "}
+              <span style={{ color: "var(--accent-brand)" }}>
+                {isMax ? fmtToken(maxRaw, decimals) : input} {asset.symbol}
+              </span>
+              {isRepay ? " to" : " from"} Aave V3 · Gnosis
+            </div>
+            {isRepay ? (
+              <>
+                <div style={{ fontFamily: "monospace", fontSize: 11, marginTop: 6 }}>
+                  Tx 1 — {asset.address.slice(0, 10)}…{"  "}0x095ea7b3 (approve)
+                </div>
+                <div style={{ fontFamily: "monospace", fontSize: 11 }}>
+                  Tx 2 — 0xb50201…26d8{"  "}0x573ade81 (repay)
+                </div>
+              </>
+            ) : (
+              <div style={{ fontFamily: "monospace", fontSize: 11, marginTop: 6 }}>
+                Tx 1 — 0xb50201…26d8{"  "}0xa415bcad (borrow)
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div style={{ padding: "0 20px 24px" }}>
         {txError && (
           <div
