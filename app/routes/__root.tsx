@@ -17,7 +17,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Miniapp Boilerplate" },
+      { title: "Aave Position" },
     ],
     links: [{ rel: "stylesheet", href: globalsCss }],
   }),
@@ -32,8 +32,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       className="h-full antialiased"
       style={
         {
-          "--font-geist-sans": "'Geist', sans-serif",
-          "--font-geist-mono": "'Geist Mono', monospace",
+          "--font-sans": "'Space Grotesk', sans-serif",
         } as React.CSSProperties
       }
     >

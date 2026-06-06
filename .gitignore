@@ -62,3 +62,4 @@ Desktop.ini
 *.pem
 .cache/
 .env*
+.claude/worktrees/
