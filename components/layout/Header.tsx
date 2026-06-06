@@ -12,7 +12,7 @@ export function Header() {
         <MobileNav />
         <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
           <CirclesLogo width={28} height={28} />
-          <span className="hidden sm:inline">Miniapp Boilerplate</span>
+          <span className="hidden sm:inline">Aave Position</span>
         </Link>
         <CurrentPage />
       </div>

@@ -1,7 +1,6 @@
 import globalsCss from "../globals.css?url";
 
 import { createRootRoute, Outlet, HeadContent, Scripts } from "@tanstack/react-router";
-import { AppShell } from "@/components/layout/AppShell";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 
 const FRAME_ANCESTORS = "'self' https://*.gnosis.io https://*.vercel.app";
@@ -50,9 +49,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   return (
     <WalletProvider>
-      <AppShell>
+      <main className="min-h-screen p-4 sm:p-6">
         <Outlet />
-      </AppShell>
+      </main>
     </WalletProvider>
   );
 }

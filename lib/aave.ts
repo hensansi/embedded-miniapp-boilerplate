@@ -6,12 +6,17 @@ const UI_POOL_DATA_PROVIDER = '0x0C6BC4a12039788be08F87e87Cff87FEDbd1D386' as co
 const POOL = '0xb50201558B00496A145fE76f7424749556E326D8' as const;
 
 const RAY = 10n ** 27n;
+const WAD = 10n ** 18n;
+const MAX_HEALTH = 10n ** 30n;
 
 const client = createPublicClient({
   chain: gnosis,
   transport: http('https://rpc.gnosischain.com'),
 });
 
+// ABI sourced from @aave/contract-helpers — field order must match exactly.
+// Aave V3 removed stable rate in newer versions; this ABI reflects the current
+// deployed UiPoolDataProviderV3 on Gnosis (0x0C6BC4a12039788be08F87e87Cff87FEDbd1D386).
 const UI_ABI = [
   {
     name: 'getReservesData',
@@ -33,50 +38,36 @@ const UI_ABI = [
           { name: 'reserveFactor', type: 'uint256' },
           { name: 'usageAsCollateralEnabled', type: 'bool' },
           { name: 'borrowingEnabled', type: 'bool' },
-          { name: 'stableBorrowRateEnabled', type: 'bool' },
           { name: 'isActive', type: 'bool' },
           { name: 'isFrozen', type: 'bool' },
           { name: 'liquidityIndex', type: 'uint128' },
           { name: 'variableBorrowIndex', type: 'uint128' },
           { name: 'liquidityRate', type: 'uint128' },
           { name: 'variableBorrowRate', type: 'uint128' },
-          { name: 'stableBorrowRate', type: 'uint128' },
           { name: 'lastUpdateTimestamp', type: 'uint40' },
           { name: 'aTokenAddress', type: 'address' },
-          { name: 'stableDebtTokenAddress', type: 'address' },
           { name: 'variableDebtTokenAddress', type: 'address' },
           { name: 'interestRateStrategyAddress', type: 'address' },
           { name: 'availableLiquidity', type: 'uint256' },
-          { name: 'totalPrincipalStableDebt', type: 'uint256' },
-          { name: 'averageStableRate', type: 'uint256' },
-          { name: 'stableDebtLastUpdateTimestamp', type: 'uint256' },
           { name: 'totalScaledVariableDebt', type: 'uint256' },
           { name: 'priceInMarketReferenceCurrency', type: 'uint256' },
           { name: 'priceOracle', type: 'address' },
           { name: 'variableRateSlope1', type: 'uint256' },
           { name: 'variableRateSlope2', type: 'uint256' },
-          { name: 'stableRateSlope1', type: 'uint256' },
-          { name: 'stableRateSlope2', type: 'uint256' },
-          { name: 'baseStableBorrowRate', type: 'uint256' },
           { name: 'baseVariableBorrowRate', type: 'uint256' },
           { name: 'optimalUsageRatio', type: 'uint256' },
           { name: 'isPaused', type: 'bool' },
           { name: 'isSiloedBorrowing', type: 'bool' },
           { name: 'accruedToTreasury', type: 'uint128' },
-          { name: 'unbacked', type: 'uint128' },
           { name: 'isolationModeTotalDebt', type: 'uint128' },
           { name: 'flashLoanEnabled', type: 'bool' },
           { name: 'debtCeiling', type: 'uint256' },
           { name: 'debtCeilingDecimals', type: 'uint256' },
-          { name: 'eModeCategoryId', type: 'uint8' },
           { name: 'borrowCap', type: 'uint256' },
           { name: 'supplyCap', type: 'uint256' },
-          { name: 'eModeLtv', type: 'uint16' },
-          { name: 'eModeLiquidationThreshold', type: 'uint16' },
-          { name: 'eModeLiquidationBonus', type: 'uint16' },
-          { name: 'eModePriceSource', type: 'address' },
-          { name: 'eModeLabel', type: 'string' },
           { name: 'borrowableInIsolation', type: 'bool' },
+          { name: 'virtualUnderlyingBalance', type: 'uint128' },
+          { name: 'deficit', type: 'uint128' },
         ],
       },
       {
@@ -107,10 +98,7 @@ const UI_ABI = [
           { name: 'underlyingAsset', type: 'address' },
           { name: 'scaledATokenBalance', type: 'uint256' },
           { name: 'usageAsCollateralEnabledOnUser', type: 'bool' },
-          { name: 'stableBorrowRate', type: 'uint256' },
           { name: 'scaledVariableDebt', type: 'uint256' },
-          { name: 'principalStableDebt', type: 'uint256' },
-          { name: 'stableBorrowLastUpdateTimestamp', type: 'uint256' },
         ],
       },
       { name: 'userEmodeCategoryId', type: 'uint8' },
@@ -144,7 +132,7 @@ export type AssetPosition = {
 export type AavePosition = {
   supplied: AssetPosition[];
   borrowed: AssetPosition[];
-  healthFactor: number; // -1 means no borrows (infinite)
+  healthFactor: number; // -1 = no borrows (infinite)
 };
 
 function scaledToAmount(scaled: bigint, index: bigint, decimals: number): number {
@@ -158,9 +146,6 @@ function scaledToAmount(scaled: bigint, index: bigint, decimals: number): number
 function rayToPercent(ray: bigint): number {
   return (Number(ray) / Number(RAY)) * 100;
 }
-
-const WAD = 10n ** 18n;
-const MAX_HEALTH = 10n ** 30n; // anything this big is effectively infinite
 
 export async function fetchAavePosition(userAddress: string): Promise<AavePosition> {
   const addr = userAddress as `0x${string}`;
@@ -218,17 +203,6 @@ export async function fetchAavePosition(userAddress: string): Promise<AavePositi
         symbol: reserve.symbol,
         amount: scaledToAmount(ur.scaledVariableDebt, reserve.variableBorrowIndex, decimals),
         apy: rayToPercent(reserve.variableBorrowRate),
-      });
-    }
-
-    if (ur.principalStableDebt > 0n) {
-      const divisor = 10n ** BigInt(decimals);
-      const intPart = ur.principalStableDebt / divisor;
-      const fracPart = ur.principalStableDebt % divisor;
-      borrowed.push({
-        symbol: `${reserve.symbol} (stable)`,
-        amount: Number(intPart) + Number(fracPart) / Number(divisor),
-        apy: rayToPercent(ur.stableBorrowRate),
       });
     }
   }
