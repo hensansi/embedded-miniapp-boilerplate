@@ -501,28 +501,47 @@ function ActionSheet({
 
 function DashboardPage() {
   const { address, isConnected } = useWallet();
+  const [overrideInput, setOverrideInput] = useState("");
+  const [overrideAddress, setOverrideAddress] = useState<string | null>(null);
+  const [editingAddress, setEditingAddress] = useState(false);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
 
+  const activeAddress = overrideAddress ?? address;
+
   const loadPosition = useCallback(async () => {
-    if (!address) return;
+    if (!activeAddress) return;
     setLoading(true);
     setFetchError(null);
     try {
-      const pos = await fetchAavePosition(address as `0x${string}`);
+      const pos = await fetchAavePosition(activeAddress as `0x${string}`);
       setPosition(pos);
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : "Failed to load position");
     } finally {
       setLoading(false);
     }
-  }, [address]);
+  }, [activeAddress]);
 
   useEffect(() => {
     loadPosition();
   }, [loadPosition]);
+
+  function applyOverride() {
+    const val = overrideInput.trim();
+    if (val.startsWith("0x") && val.length === 42) {
+      setOverrideAddress(val);
+    }
+    setEditingAddress(false);
+  }
+
+  function resetOverride() {
+    setOverrideAddress(null);
+    setOverrideInput("");
+    setEditingAddress(false);
+  }
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -598,13 +617,36 @@ function DashboardPage() {
       >
         {/* ── Hero card ─────────────────────────────────────────────────── */}
         <Card style={{ padding: "24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", flexShrink: 0 }}>
               Total Debt
             </div>
-            <span style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", wordBreak: "break-all" }}>
-              {address ?? "—"}
-            </span>
+            {editingAddress ? (
+              <div style={{ display: "flex", gap: 6, flex: 1, minWidth: 0 }}>
+                <input
+                  autoFocus
+                  value={overrideInput}
+                  onChange={(e) => setOverrideInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") applyOverride(); if (e.key === "Escape") setEditingAddress(false); }}
+                  placeholder="0x…"
+                  style={{ flex: 1, fontSize: 11, fontFamily: "monospace", border: "1px solid var(--line)", borderRadius: 8, padding: "4px 8px", outline: "none", minWidth: 0, color: "var(--ink)" }}
+                />
+                <button onClick={applyOverride} style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-brand)", background: "none", border: "none", cursor: "pointer", padding: "4px 2px", fontFamily: "inherit" }}>Go</button>
+                <button onClick={() => setEditingAddress(false)} style={{ fontSize: 11, color: "var(--muted-text)", background: "none", border: "none", cursor: "pointer", padding: "4px 2px", fontFamily: "inherit" }}>✕</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {overrideAddress && (
+                  <button onClick={resetOverride} style={{ fontSize: 10, color: "var(--muted-text)", background: "var(--line-soft)", border: "none", borderRadius: 4, cursor: "pointer", padding: "2px 6px", fontFamily: "inherit" }}>reset</button>
+                )}
+                <span
+                  onClick={() => { setOverrideInput(activeAddress ?? ""); setEditingAddress(true); }}
+                  style={{ fontSize: 10, color: overrideAddress ? "var(--accent-brand)" : "var(--muted-text)", fontFamily: "monospace", cursor: "pointer", wordBreak: "break-all", textAlign: "right" }}
+                >
+                  {activeAddress ? shortenAddress(activeAddress, 6) : "—"}
+                </span>
+              </div>
+            )}
           </div>
           <div
             style={{
