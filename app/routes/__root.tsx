@@ -1,7 +1,6 @@
 import globalsCss from "../globals.css?url";
 
 import { createRootRoute, Outlet, HeadContent, Scripts } from "@tanstack/react-router";
-import { AppShell } from "@/components/layout/AppShell";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 
 const FRAME_ANCESTORS = "'self' https://*.gnosis.io https://*.vercel.app";
@@ -17,7 +16,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Miniapp Boilerplate" },
+      { title: "Aave V3 — Gnosis" },
     ],
     links: [{ rel: "stylesheet", href: globalsCss }],
   }),
@@ -27,16 +26,7 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="en"
-      className="h-full antialiased"
-      style={
-        {
-          "--font-geist-sans": "'Geist', sans-serif",
-          "--font-geist-mono": "'Geist Mono', monospace",
-        } as React.CSSProperties
-      }
-    >
+    <html lang="en" className="h-full antialiased">
       <head>
         <HeadContent />
       </head>
@@ -51,9 +41,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   return (
     <WalletProvider>
-      <AppShell>
+      <main className="min-h-screen p-3 sm:p-4">
         <Outlet />
-      </AppShell>
+      </main>
     </WalletProvider>
   );
 }
