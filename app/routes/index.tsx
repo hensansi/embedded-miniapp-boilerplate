@@ -256,6 +256,7 @@ function AddressPicker({
   onChange: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -267,54 +268,88 @@ function AddressPicker({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  function handleCopy() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
   const canSwitch = options.length > 1;
   const label = (addr: string) =>
-    addr === connectedAddress ? `${shortenAddress(addr, 4)} (connected)` : shortenAddress(addr, 4);
+    addr === connectedAddress ? `${addr} (connected)` : addr;
 
   return (
-    <div ref={ref} style={{ position: "relative", maxWidth: 160 }}>
-      <button
-        onClick={() => canSwitch && setOpen((v) => !v)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 11,
-          fontFamily: "monospace",
-          color: value !== connectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
-          background: open ? "var(--accent-soft)" : "var(--surface)",
-          border: `1px solid ${open ? "var(--accent-brand)" : "var(--line)"}`,
-          borderRadius: "var(--radius-pill)",
-          padding: "4px 10px",
-          cursor: canSwitch ? "pointer" : "default",
-          outline: "none",
-          width: "100%",
-          textAlign: "left",
-          transition: "background 0.15s, border-color 0.15s",
-          whiteSpace: "nowrap",
-        }}
-      >
-        <span style={{ flex: 1 }}>{label(value)}</span>
-        {canSwitch && (
-          <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-            <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        )}
-      </button>
+    <div ref={ref} style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* address + optional switcher */}
+        <button
+          onClick={() => canSwitch && setOpen((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            fontFamily: "monospace",
+            color: value !== connectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: canSwitch ? "pointer" : "default",
+            outline: "none",
+            wordBreak: "break-all",
+            textAlign: "left",
+          }}
+        >
+          <span>{value}</span>
+          {canSwitch && (
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+              <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </button>
+        {/* copy button */}
+        <button
+          onClick={handleCopy}
+          title="Copy address"
+          style={{
+            flexShrink: 0,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 2,
+            color: copied ? "var(--accent-brand)" : "var(--muted-text)",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          {copied ? (
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2 7l3 3 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <rect x="4.5" y="1" width="7.5" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+              <path d="M1 4.5h2M1 4.5V11.5a1 1 0 001 1h6.5V11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          )}
+        </button>
+      </div>
+
       {open && (
         <div
           style={{
             position: "absolute",
             top: "100%",
             right: 0,
-            marginTop: 4,
+            marginTop: 6,
             background: "#fff",
             border: "1px solid var(--line)",
             borderRadius: 8,
             boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
             zIndex: 100,
-            minWidth: "100%",
             overflow: "hidden",
+            minWidth: 300,
           }}
         >
           {options.map((addr) => (
@@ -325,14 +360,15 @@ function AddressPicker({
                 display: "block",
                 width: "100%",
                 textAlign: "left",
-                padding: "8px 12px",
-                fontSize: 11,
+                padding: "10px 14px",
+                fontSize: 10,
                 fontFamily: "monospace",
                 background: addr === value ? "var(--accent-soft)" : "transparent",
                 color: addr === value ? "var(--accent-brand)" : "var(--ink)",
                 border: "none",
+                borderBottom: "1px solid var(--line-soft)",
                 cursor: "pointer",
-                whiteSpace: "nowrap",
+                wordBreak: "break-all",
               }}
             >
               {label(addr)}
@@ -738,18 +774,8 @@ function DashboardPage() {
       >
         {/* ── Hero card ─────────────────────────────────────────────────── */}
         <Card style={{ padding: "24px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8 }}>
-            <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", flexShrink: 0 }}>
-              Total Debt
-            </div>
-            {activeAddress && (
-              <AddressPicker
-                options={allSafes.length ? allSafes : [activeAddress]}
-                value={activeAddress}
-                connectedAddress={address ?? ""}
-                onChange={setSelectedAddress}
-              />
-            )}
+          <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", marginBottom: 12 }}>
+            Total Debt
           </div>
           <div
             style={{
@@ -768,6 +794,16 @@ function DashboardPage() {
               €{fmtEur(position.availableBorrowsEur)} available to borrow
             </span>
           </div>
+          {activeAddress && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-soft)" }}>
+              <AddressPicker
+                options={allSafes.length ? allSafes : [activeAddress]}
+                value={activeAddress}
+                connectedAddress={address ?? ""}
+                onChange={setSelectedAddress}
+              />
+            </div>
+          )}
         </Card>
 
         {/* ── Your borrows ──────────────────────────────────────────────── */}
@@ -800,19 +836,27 @@ function DashboardPage() {
         {/* ── Available to borrow ───────────────────────────────────────── */}
         <div>
           <SectionLabel>Available to Borrow</SectionLabel>
-          {(() => {
-            const eure = position.borrowable.find((a) => a.symbol === "EURe");
-            return eure ? (
-              <BorrowTile
-                asset={eure}
-                onBorrow={() => setSheet({ type: "borrow", asset: eure })}
-              />
-            ) : (
-              <div style={{ color: "var(--muted-text)", fontSize: 14 }}>
-                Nothing available
-              </div>
-            );
-          })()}
+          <Card>
+            {(() => {
+              const eure = position.borrowable.find((a) => a.symbol === "EURe");
+              if (!eure) return (
+                <div style={{ padding: "20px", color: "var(--muted-text)", fontSize: 14, textAlign: "center" }}>
+                  Nothing available
+                </div>
+              );
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+                  <TokenIcon symbol={eure.symbol} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{eure.symbol}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-text)" }}>up to {fmtToken(eure.maxAmount, eure.decimals)} EURe</div>
+                  </div>
+                  <ApyBadge apy={eure.apy} />
+                  <OutlineButton onClick={() => setSheet({ type: "borrow", asset: eure })}>Borrow</OutlineButton>
+                </div>
+              );
+            })()}
+          </Card>
         </div>
       </div>
 
