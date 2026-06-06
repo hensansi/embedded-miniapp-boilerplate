@@ -660,15 +660,24 @@ function DashboardPage() {
         .then((r) => r.json()).catch(() => ({ safes: [] }));
       if (direct.safes?.length) { setOwnedSafes(direct.safes.filter((s: string) => s !== address)); return; }
 
-      // Connected address is a Safe — get its owners, then query each sequentially
-      // to avoid rate-limiting (public Safe API throttles parallel requests)
+      // Connected address is a Safe — get its owners
       const safeInfo = await fetch(`${BASE}/safes/${address}/`)
         .then((r) => r.json()).catch(() => null);
       const owners: string[] = safeInfo?.owners ?? [];
 
-      const related = new Set<string>();
+      // Filter to EOA owners only: a Safe owner returns valid JSON from /safes/{addr}/,
+      // an EOA returns 404 or fails. We only want passkey EOAs, not co-signer Safes.
+      const eoaOwners: string[] = [];
       for (const owner of owners) {
-        const res = await fetch(`${BASE}/owners/${owner}/safes/`)
+        const isSafe = await fetch(`${BASE}/safes/${owner}/`)
+          .then((r) => r.ok).catch(() => false);
+        if (!isSafe) eoaOwners.push(owner);
+      }
+
+      // Get all safes owned by the passkey EOA(s)
+      const related = new Set<string>();
+      for (const eoa of eoaOwners) {
+        const res = await fetch(`${BASE}/owners/${eoa}/safes/`)
           .then((r) => r.json()).catch(() => ({ safes: [] }));
         for (const s of (res.safes ?? []) as string[]) {
           if (s !== address) related.add(s);
