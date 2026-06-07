@@ -825,15 +825,30 @@ function TopUpSheet({
 }) {
   const [destination, setDestination] = useState(defaultDestination ?? "");
   useEffect(() => {
-    // Card safe is owned by the source safe (2-level lookup: EOA → source safe → card safe)
-    fetch(`https://api.safe.global/tx-service/gno/api/v1/owners/${safeAddress}/safes/`)
+    // Discover card safe via HyperIndex: signer EOA → DelayModuleOwner → card safe address
+    fetch("https://indexer.eu.hyperindex.xyz/00dfbaf/v1/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query payOwners($address: String) {
+          Metri_Pay_DelayModuleOwner(where: {ownerAddress: {_eq: $address}}) {
+            delayModule { safeAddress }
+          }
+        }`,
+        variables: { address: signerAddress },
+      }),
+    })
       .then((r) => r.json())
       .then((data) => {
-        const safes: string[] = data.safes ?? [];
-        if (safes.length > 0) setDestination(safes[0]);
+        const entries: { delayModule: { safeAddress: string } }[] =
+          data?.data?.Metri_Pay_DelayModuleOwner ?? [];
+        if (entries.length > 0) {
+          // Last entry is the most recently associated card safe
+          setDestination(entries[entries.length - 1].delayModule.safeAddress);
+        }
       })
       .catch(() => {});
-  }, [safeAddress]);
+  }, [signerAddress]);
 
   const [cardBalance, setCardBalance] = useState<bigint | null>(null);
   useEffect(() => {
