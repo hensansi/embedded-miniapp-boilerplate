@@ -12,10 +12,6 @@ import {
   buildBorrowTx,
   buildRepayTx,
   MAX_REPAY_AMOUNT,
-  POOL,
-  SELECTOR_BORROW,
-  SELECTOR_REPAY,
-  SELECTOR_APPROVE,
 } from "@/lib/aave-actions";
 import {
   Sheet,
@@ -553,6 +549,18 @@ function ActionSheet({
     }
   }
 
+  // Build the actual transactions so calldata shown matches exactly what will be submitted
+  let previewTxs: { to: `0x${string}`; data: `0x${string}` }[] = [];
+  if (canConfirm) {
+    const addr = walletAddress as `0x${string}`;
+    if (isRepay) {
+      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
+      previewTxs = buildRepayTx((asset as AssetPosition).address, amountWei, addr);
+    } else {
+      previewTxs = buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
+    }
+  }
+
   return (
     <>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -692,22 +700,16 @@ function ActionSheet({
             {/* Divider */}
             <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
 
-            {/* Raw tx details — derived from the same constants used to build the txs */}
-            <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", lineHeight: 2, wordBreak: "break-all" }}>
-              {isRepay ? (
-                <>
-                  <div>Tx 1 · to: {asset.address}</div>
-                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_APPROVE} (approve)</div>
-                  <div style={{ marginTop: 4 }}>Tx 2 · to: {POOL}</div>
-                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_REPAY} (repay)</div>
-                </>
-              ) : (
-                <>
-                  <div>Tx 1 · to: {POOL}</div>
-                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_BORROW} (borrow)</div>
-                </>
-              )}
-              <div style={{ marginTop: 4 }}>Protocol: Aave V3 · Gnosis Chain</div>
+            {/* Full calldata — identical to what will be submitted */}
+            <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", lineHeight: 1.9, wordBreak: "break-all" }}>
+              {previewTxs.map((tx, i) => (
+                <div key={i} style={{ marginBottom: i < previewTxs.length - 1 ? 10 : 0 }}>
+                  <div style={{ fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>Transaction {i + 1}</div>
+                  <div><span style={{ color: "var(--muted-text)" }}>to: </span>{tx.to}</div>
+                  <div><span style={{ color: "var(--muted-text)" }}>data: </span>{tx.data}</div>
+                </div>
+              ))}
+              <div style={{ marginTop: 8, color: "var(--muted-text)" }}>Protocol: Aave V3 · Gnosis Chain</div>
             </div>
           </div>
         </div>
