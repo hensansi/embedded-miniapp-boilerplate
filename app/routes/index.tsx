@@ -436,6 +436,35 @@ function BorrowRow({
 
 // ─── Borrowable tile (grid item) ─────────────────────────────────────────────
 
+// ─── Tx decoder row ──────────────────────────────────────────────────────────
+
+function TxRow({ label, contract, fn, params }: {
+  label: string;
+  contract: string;
+  fn: string;
+  params: { name: string; value: string }[];
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", marginBottom: 4, wordBreak: "break-all" }}>
+        Contract: {contract}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 6 }}>
+        Function: <span style={{ fontFamily: "monospace" }}>{fn}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {params.map(({ name, value }) => (
+          <div key={name} style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 6, fontSize: 10 }}>
+            <span style={{ color: "var(--muted-text)" }}>{name}</span>
+            <span style={{ fontFamily: "monospace", wordBreak: "break-all", color: "var(--ink)" }}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Action sheet ────────────────────────────────────────────────────────────
 
 type SheetState =
@@ -709,16 +738,30 @@ function ActionSheet({
             {/* Divider */}
             <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
 
-            {/* Full calldata — identical to what will be submitted */}
-            <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", lineHeight: 1.9, wordBreak: "break-all" }}>
-              {previewTxs.map((tx, i) => (
-                <div key={i} style={{ marginBottom: i < previewTxs.length - 1 ? 10 : 0 }}>
-                  <div style={{ fontWeight: 700, color: "var(--ink)", marginBottom: 2 }}>Transaction {i + 1}</div>
-                  <div><span style={{ color: "var(--muted-text)" }}>to: </span>{tx.to}</div>
-                  <div><span style={{ color: "var(--muted-text)" }}>data: </span>{tx.data}</div>
-                </div>
-              ))}
-              <div style={{ marginTop: 8, color: "var(--muted-text)" }}>Protocol: Aave V3 · Gnosis Chain</div>
+            {/* Decoded transactions — parameters we passed when building the txs */}
+            <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+              {isRepay ? (
+                <>
+                  <TxRow label="Tx 1 — ERC-20 approve" contract={asset.address} fn="approve(spender, amount)" params={[
+                    { name: "spender (Aave Pool)", value: previewTxs[0]?.to ?? "" },
+                    { name: "amount", value: isMax ? "max (full debt repayment)" : `${input} ${asset.symbol}` },
+                  ]} />
+                  <TxRow label="Tx 2 — Aave Pool repay" contract={previewTxs[1]?.to ?? ""} fn="repay(asset, amount, rateMode, onBehalfOf)" params={[
+                    { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                    { name: "amount", value: isMax ? "max (full debt + accrued interest)" : `${input} ${asset.symbol}` },
+                    { name: "rateMode", value: "2 — variable rate" },
+                    { name: "onBehalfOf", value: walletAddress },
+                  ]} />
+                </>
+              ) : (
+                <TxRow label="Tx 1 — Aave Pool borrow" contract={previewTxs[0]?.to ?? ""} fn="borrow(asset, amount, rateMode, referral, onBehalfOf)" params={[
+                  { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                  { name: "amount", value: `${input} ${asset.symbol}` },
+                  { name: "rateMode", value: "2 — variable rate" },
+                  { name: "referralCode", value: "0" },
+                  { name: "onBehalfOf", value: walletAddress },
+                ]} />
+              )}
             </div>
           </div>
         </div>
