@@ -977,13 +977,13 @@ function TopUpSheet({
           <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
             <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card wallet</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
-              {cardBalance !== null ? `${fmtToken(Number(cardBalance) / 1e18, 18)} EURe` : "…"}
+              {cardBalance !== null ? `€${fmtEur(Number(cardBalance) / 1e18)} EURe` : "…"}
             </div>
           </div>
           <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
             <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Available to send</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
-              {fmtToken(balanceHuman, 18)} EURe
+              €{fmtEur(balanceHuman)} EURe
             </div>
           </div>
         </div>
@@ -1084,7 +1084,7 @@ function WithdrawSheet({
         <div style={{ background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
           <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card balance</div>
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
-            {fmtToken(balanceHuman, 18)} EURe
+            €{fmtEur(balanceHuman)} EURe
           </div>
         </div>
 
@@ -1217,7 +1217,7 @@ function SweepViaDelayButton({
 
   return (
     <OutlineButton onClick={handleQueue} disabled={submitting} style={{ fontSize: 12 }}>
-      {submitting ? "…" : `Sweep ${formatUnits(dustAmount, 18)} →`}
+      {submitting ? "…" : `Sweep €${Number(formatUnits(dustAmount, 18)).toFixed(4)} →`}
     </OutlineButton>
   );
 }
@@ -1498,7 +1498,7 @@ function DashboardPage() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
                     <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>EURe</span>
                     <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", flexShrink: 0 }}>
-                      {cardSafeBalance !== null ? fmtToken(Number(cardSafeBalance) / 1e18, 18) : "…"}
+                      {cardSafeBalance !== null ? `€${fmtEur(Number(cardSafeBalance) / 1e18)}` : "…"}
                     </span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
