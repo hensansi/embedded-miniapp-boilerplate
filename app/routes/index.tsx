@@ -1264,7 +1264,7 @@ function DashboardPage() {
                   <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
                   <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
                     {cardSafeBalance !== null
-                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 2)} EURe on card`
+                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
                       : "loading…"}
                   </div>
                 </div>
