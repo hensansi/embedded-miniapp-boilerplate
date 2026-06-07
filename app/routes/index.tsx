@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import {
@@ -611,7 +611,6 @@ function ActionSheet({
 
   return (
     <>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <SheetHeader style={{ padding: "20px 20px 0" }}>
         <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>
           {title}
@@ -961,6 +960,7 @@ function DashboardPage() {
   const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
   const [safesLoading, setSafesLoading] = useState(false);
   const [safesLoaded, setSafesLoaded] = useState(false);
+  const safesLoadingRef = useRef(false);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
@@ -983,7 +983,8 @@ function DashboardPage() {
 
   // Declare callbacks before the effects that reference them (avoids TDZ in the minified bundle)
   const loadSiblingsSafes = useCallback(async () => {
-    if (!address || safesLoaded || safesLoading) return;
+    if (!address || safesLoaded || safesLoadingRef.current) return;
+    safesLoadingRef.current = true;
     setSafesLoading(true);
     const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
     try {
@@ -992,10 +993,11 @@ function DashboardPage() {
       const safes: string[] = (res.safes ?? []).filter((s: string) => s !== address);
       setOwnedSafes(safes);
     } finally {
+      safesLoadingRef.current = false;
       setSafesLoading(false);
       setSafesLoaded(true);
     }
-  }, [address, safesLoaded, safesLoading]);
+  }, [address, safesLoaded]);
 
   const loadPosition = useCallback(async () => {
     if (!activeAddress) return;
@@ -1039,22 +1041,31 @@ function DashboardPage() {
 
   // Fetch EURe wallet balance of the active safe whenever position or address changes
   useEffect(() => {
-    if (!activeAddress || !position) { setEureWalletBalance(null); return; }
-    const eureAsset =
-      position.borrows.find((b) => b.symbol === 'EURe') ??
-      position.borrowable.find((b) => b.symbol === 'EURe') ??
-      position.supplies.find((b) => b.symbol === 'EURe');
-    if (!eureAsset) { setEureWalletBalance(null); return; }
+    if (!activeAddress || !eureAsset) { setEureWalletBalance(null); return; }
     fetchErc20Balance(eureAsset.address as `0x${string}`, activeAddress as `0x${string}`)
       .then(setEureWalletBalance)
       .catch(() => setEureWalletBalance(null));
-  }, [activeAddress, position]);
+  }, [activeAddress, eureAsset]);
 
-  const allSafes = address ? [address, ...ownedSafes] : [];
+  const allSafes = useMemo(
+    () => (address ? [address, ...ownedSafes] : []),
+    [address, ownedSafes],
+  );
   // Borrow/repay are available when:
   // - viewing own address, OR
   // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
   const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
+
+  // EURe asset — derived from position, memoized to avoid repeated .find() scans
+  const eureAsset = useMemo(() => {
+    if (!position) return null;
+    return (
+      position.borrows.find((b) => b.symbol === 'EURe') ??
+      position.borrowable.find((b) => b.symbol === 'EURe') ??
+      position.supplies.find((b) => b.symbol === 'EURe') ??
+      null
+    );
+  }, [position]);
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -1164,32 +1175,24 @@ function DashboardPage() {
           )}
         </Card>
 
-        {/* ── Your borrows ──────────────────────────────────────────────── */}
-        <div>
-          <SectionLabel>Your Borrows</SectionLabel>
-          <Card>
-            {position.borrows.length === 0 ? (
-              <div
-                style={{
-                  padding: "20px",
-                  color: "var(--muted-text)",
-                  fontSize: 14,
-                  textAlign: "center",
-                }}
-              >
-                No open borrows
+        {/* ── Wallet EURe balance ───────────────────────────────────────── */}
+        {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
+          <div>
+            <SectionLabel>Wallet Balance</SectionLabel>
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+                <TokenIcon symbol="EURe" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
+                    {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
+                  </div>
+                </div>
+                <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
               </div>
-            ) : (
-              position.borrows.map((b) => (
-                <BorrowRow
-                  key={b.address}
-                  asset={b}
-                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
-                />
-              ))
-            )}
-          </Card>
-        </div>
+            </Card>
+          </div>
+        )}
 
         {/* ── Available to borrow ───────────────────────────────────────── */}
         <div>
@@ -1220,6 +1223,33 @@ function DashboardPage() {
           </Card>
         </div>
 
+        {/* ── Your borrows ──────────────────────────────────────────────── */}
+        <div>
+          <SectionLabel>Your Borrows</SectionLabel>
+          <Card>
+            {position.borrows.length === 0 ? (
+              <div
+                style={{
+                  padding: "20px",
+                  color: "var(--muted-text)",
+                  fontSize: 14,
+                  textAlign: "center",
+                }}
+              >
+                No open borrows
+              </div>
+            ) : (
+              position.borrows.map((b) => (
+                <BorrowRow
+                  key={b.address}
+                  asset={b}
+                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
+                />
+              ))
+            )}
+          </Card>
+        </div>
+
         {/* ── Read-only notice ──────────────────────────────────────────── */}
         {selectedAddress && selectedAddress !== address && !isOwnerOfSelected && (
           <div style={{
@@ -1232,25 +1262,6 @@ function DashboardPage() {
             lineHeight: 1.5,
           }}>
             <strong>View only.</strong> Your connected wallet is not an owner of this safe. Switch accounts in the Circles app to transact.
-          </div>
-        )}
-
-        {/* ── Wallet EURe balance ───────────────────────────────────────── */}
-        {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
-          <div>
-            <SectionLabel>Wallet Balance</SectionLabel>
-            <Card>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
-                <TokenIcon symbol="EURe" />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
-                  <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
-                    {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
-                  </div>
-                </div>
-                <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
-              </div>
-            </Card>
           </div>
         )}
       </div>
@@ -1282,16 +1293,12 @@ function DashboardPage() {
         onOpenChange={(open: boolean) => { if (!open) setTopupOpen(false); }}
       >
         <SheetContent side="bottom" showCloseButton>
-          {isOwnerOfSelected && selectedAddress && address && eureWalletBalance !== null && position && (
+          {isOwnerOfSelected && selectedAddress && address && eureWalletBalance !== null && eureAsset && (
             <TopUpSheet
               safeAddress={selectedAddress as `0x${string}`}
               signerAddress={address as `0x${string}`}
               eureBalance={eureWalletBalance}
-              eureAddress={(
-                position.borrows.find((b) => b.symbol === 'EURe') ??
-                position.borrowable.find((b) => b.symbol === 'EURe') ??
-                position.supplies.find((b) => b.symbol === 'EURe')
-              )?.address as `0x${string}`}
+              eureAddress={eureAsset.address as `0x${string}`}
               defaultDestination={address}
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
             />
