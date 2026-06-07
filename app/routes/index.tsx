@@ -1001,6 +1001,114 @@ function TopUpSheet({
   );
 }
 
+// ─── Withdraw sheet (card safe → source safe) ────────────────────────────────
+
+function WithdrawSheet({
+  cardSafeAddress,
+  signerAddress,
+  sourceAddress,
+  eureAddress,
+  cardBalance,
+  onSuccess,
+}: {
+  cardSafeAddress: `0x${string}`;
+  signerAddress: `0x${string}`;
+  sourceAddress: `0x${string}`;
+  eureAddress: `0x${string}`;
+  cardBalance: bigint;
+  onSuccess: () => void;
+}) {
+  const balanceHuman = Number(cardBalance) / 1e18;
+  const [amount, setAmount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+
+  const parsedAmount = parseFloat(amount) || 0;
+  const canConfirm = parsedAmount > 0 && !submitting;
+
+  function handleMax() {
+    setAmount((Math.floor(balanceHuman * 100) / 100).toFixed(2));
+  }
+
+  async function handleConfirm() {
+    if (!canConfirm) return;
+    setSubmitting(true);
+    setTxError(null);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const amountWei = parseUnits(amount, 18);
+      const transferTx = buildErc20TransferTx(eureAddress, sourceAddress, amountWei);
+      const tx = wrapInExecTransaction(transferTx, cardSafeAddress, signerAddress);
+      await sendTransactions([tx]);
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <SheetHeader style={{ padding: "20px 20px 0" }}>
+        <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>Withdraw from Card</SheetTitle>
+        <SheetDescription style={{ color: "var(--muted-text)", fontSize: 13 }}>
+          Transfer EURe from card back to source wallet
+        </SheetDescription>
+      </SheetHeader>
+
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+          <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card balance</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+            {fmtToken(balanceHuman, 18)} EURe
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Amount</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid var(--line)", borderRadius: 12, padding: "4px 4px 4px 16px" }}>
+            <input
+              type="number"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              style={{ flex: 1, fontSize: 28, fontWeight: 600, border: "none", outline: "none", background: "transparent", color: "var(--ink)", fontFamily: "inherit", minWidth: 0 }}
+            />
+            <button
+              onClick={handleMax}
+              style={{ background: "var(--accent-soft)", color: "var(--accent-brand)", border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
+            >MAX</button>
+          </div>
+          {parsedAmount > 0 && !Number.isInteger(parsedAmount * 100) && (
+            <button
+              onClick={() => setAmount((Math.floor(parsedAmount * 100) / 100).toFixed(2))}
+              style={{ marginTop: 6, background: "none", border: "none", color: "var(--accent-brand)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0 }}
+            >
+              Trim to cents → {(Math.floor(parsedAmount * 100) / 100).toFixed(2)}
+            </button>
+          )}
+        </div>
+
+        {txError && (
+          <div style={{ background: "#fee2e2", color: "#7f1d1d", fontSize: 13, padding: "10px 14px", borderRadius: 10 }}>
+            {txError}
+          </div>
+        )}
+
+        <OutlineButton
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
+        >
+          {submitting ? "Sending…" : "Confirm Withdraw"}
+        </OutlineButton>
+      </div>
+    </>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 function DashboardPage() {
@@ -1016,6 +1124,7 @@ function DashboardPage() {
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
   const [topupOpen, setTopupOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
   const [cardSafeAddress, setCardSafeAddress] = useState<string | null>(null);
   const [cardSafeBalance, setCardSafeBalance] = useState<bigint | null>(null);
@@ -1276,10 +1385,16 @@ function DashboardPage() {
                       : "loading…"}
                   </div>
                 </div>
-                <OutlineButton
-                  onClick={() => setTopupOpen(true)}
-                  disabled={!eureWalletBalance || eureWalletBalance === 0n}
-                >Top Up</OutlineButton>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <OutlineButton
+                    onClick={() => setWithdrawOpen(true)}
+                    disabled={!cardSafeBalance || cardSafeBalance === 0n}
+                  >Withdraw</OutlineButton>
+                  <OutlineButton
+                    onClick={() => setTopupOpen(true)}
+                    disabled={!eureWalletBalance || eureWalletBalance === 0n}
+                  >Top Up</OutlineButton>
+                </div>
               </div>
             </Card>
           </div>
@@ -1393,6 +1508,25 @@ function DashboardPage() {
               eureAddress={eureAsset.address as `0x${string}`}
               defaultDestination={cardSafeAddress ?? ""}
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Withdraw sheet ────────────────────────────────────────────────── */}
+      <Sheet
+        open={withdrawOpen}
+        onOpenChange={(open: boolean) => { if (!open) setWithdrawOpen(false); }}
+      >
+        <SheetContent side="bottom" showCloseButton>
+          {cardSafeAddress && address && selectedAddress && eureAsset && cardSafeBalance !== null && (
+            <WithdrawSheet
+              cardSafeAddress={cardSafeAddress as `0x${string}`}
+              signerAddress={address as `0x${string}`}
+              sourceAddress={selectedAddress as `0x${string}`}
+              eureAddress={eureAsset.address as `0x${string}`}
+              cardBalance={cardSafeBalance}
+              onSuccess={() => { setWithdrawOpen(false); loadPosition(); }}
             />
           )}
         </SheetContent>
