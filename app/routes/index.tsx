@@ -442,6 +442,32 @@ function BorrowRow({
 
 // ─── Tx decoder row ──────────────────────────────────────────────────────────
 
+function TxRow({ label, contract, fn, params }: {
+  label: string;
+  contract: string;
+  fn: string;
+  params: { name: string; value: string }[];
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", marginBottom: 4, wordBreak: "break-all" }}>
+        Contract: {contract}
+      </div>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 6 }}>
+        Function: <span style={{ fontFamily: "monospace" }}>{fn}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {params.map(({ name, value }) => (
+          <div key={name} style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 6, fontSize: 10 }}>
+            <span style={{ color: "var(--muted-text)" }}>{name}</span>
+            <span style={{ fontFamily: "monospace", wordBreak: "break-all", color: "var(--ink)" }}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ─── Action sheet ────────────────────────────────────────────────────────────
 
@@ -498,6 +524,15 @@ function ActionSheet({
   const eurEquiv = parsedInput * eurPerUnit;
   const canConfirm = (isMax || parsedInput > 0) && !submitting;
 
+  const previewTxs = useMemo((): { to: `0x${string}`; data: `0x${string}` }[] => {
+    if (!canConfirm || !asset) return [];
+    const addr = walletAddress as `0x${string}`;
+    if (isRepay) {
+      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
+      return buildRepayTx((asset as AssetPosition).address, amountWei, addr);
+    }
+    return buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
+  }, [canConfirm, isRepay, isMax, input, decimals, walletAddress, asset]);
 
   if (!sheet || !asset) return null;
 
@@ -746,6 +781,31 @@ function ActionSheet({
               </div>
             )}
 
+            {/* Divider */}
+            <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
+
+            {/* Decoded transactions */}
+            <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+              {isRepay ? (
+                <>
+                  <TxRow label="Tx 1 — ERC-20 approve" contract={asset.address} fn="approve(spender, amount)" params={[
+                    { name: "spender (Aave Pool)", value: previewTxs[0]?.to ?? "" },
+                    { name: "amount", value: isMax ? "max (full debt repayment)" : `${input} ${asset.symbol}` },
+                  ]} />
+                  <TxRow label="Tx 2 — Aave Pool repay" contract={previewTxs[1]?.to ?? ""} fn="repay(asset, amount, rateMode, onBehalfOf)" params={[
+                    { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                    { name: "amount", value: isMax ? "max (full debt + accrued interest)" : `${input} ${asset.symbol}` },
+                    { name: "onBehalfOf", value: walletAddress },
+                  ]} />
+                </>
+              ) : (
+                <TxRow label="Tx 1 — Aave Pool borrow" contract={previewTxs[0]?.to ?? ""} fn="borrow(asset, amount, rateMode, referral, onBehalfOf)" params={[
+                  { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                  { name: "amount", value: `${input} ${asset.symbol}` },
+                  { name: "onBehalfOf", value: walletAddress },
+                ]} />
+              )}
+            </div>
           </div>
         </div>
       )}
