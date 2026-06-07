@@ -311,11 +311,10 @@ function AddressPicker({
             padding: 0,
             cursor: "pointer",
             outline: "none",
-            wordBreak: "break-all",
             textAlign: "left",
           }}
         >
-          <span>{value}</span>
+          <span>{value.slice(0, 6)}…{value.slice(-4)}</span>
           <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
             <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
@@ -407,8 +406,8 @@ function CardAddressCopy({ address }: { address: string }) {
   }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
-      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--muted-text)", wordBreak: "break-all" }}>
-        {address}
+      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--muted-text)" }}>
+        {address.slice(0, 6)}…{address.slice(-4)}
       </span>
       <button
         onClick={handleCopy}
@@ -451,23 +450,18 @@ function BorrowRow({
     >
       <TokenIcon symbol={asset.symbol} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>
-          {asset.symbol}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+          <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{asset.symbol}</span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", flexShrink: 0 }}>{fmtToken(asset.amount, asset.decimals)}</span>
         </div>
-        <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
-          Aave v3
-        </div>
-      </div>
-      <div style={{ textAlign: "right", marginRight: 12 }}>
-        <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>
-          {fmtToken(asset.amount, asset.decimals)}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--muted-text)" }}>
-          ≈€{fmtEur(asset.amountEur)}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--muted-text)", whiteSpace: "nowrap" }}>≈€{fmtEur(asset.amountEur)} · Aave v3</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <ApyBadge apy={asset.apy} />
+            <OutlineButton onClick={onRepay} disabled={!onRepay}>Repay</OutlineButton>
+          </div>
         </div>
       </div>
-      <ApyBadge apy={asset.apy} />
-      <OutlineButton onClick={onRepay} disabled={!onRepay}>Repay</OutlineButton>
     </div>
   );
 }
@@ -1022,13 +1016,9 @@ function TopUpSheet({
           </div>
         )}
 
-        <OutlineButton
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
-        >
-          {submitting ? "Sending…" : "Confirm Top Up"}
-        </OutlineButton>
+        <PrimaryButton onClick={handleConfirm} disabled={!canConfirm} style={{ padding: "14px" }}>
+          {submitting ? <Spinner /> : "Confirm Top Up →"}
+        </PrimaryButton>
       </div>
     </>
   );
@@ -1130,13 +1120,9 @@ function WithdrawSheet({
           </div>
         )}
 
-        <OutlineButton
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
-        >
-          {submitting ? "Sending…" : "Confirm Withdraw"}
-        </OutlineButton>
+        <PrimaryButton onClick={handleConfirm} disabled={!canConfirm} style={{ padding: "14px" }}>
+          {submitting ? <Spinner /> : "Confirm Withdraw →"}
+        </PrimaryButton>
       </div>
     </>
   );
@@ -1509,32 +1495,34 @@ function DashboardPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
                 <TokenIcon symbol="EURe" />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
-                  <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
-                    {cardSafeBalance !== null
-                      ? `${formatUnits(cardSafeBalance, 18)} EURe on card`
-                      : "loading…"}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>EURe</span>
+                    <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", flexShrink: 0 }}>
+                      {cardSafeBalance !== null ? fmtToken(Number(cardSafeBalance) / 1e18, 18) : "…"}
+                    </span>
                   </div>
-                  <CardAddressCopy address={cardSafeAddress} />
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {cardSafeBalance !== null && cardSafeBalance % (10n ** 16n) > 0n && delayModuleAddress && (
-                    <SweepViaDelayButton
-                      delayModuleAddress={delayModuleAddress as `0x${string}`}
-                      eureAddress={eureAsset!.address as `0x${string}`}
-                      sourceAddress={selectedAddress as `0x${string}`}
-                      dustAmount={cardSafeBalance % (10n ** 16n)}
-                      onSuccess={() => { loadPosition(); }}
-                    />
-                  )}
-                  <OutlineButton
-                    onClick={() => setWithdrawOpen(true)}
-                    disabled={!cardSafeBalance || cardSafeBalance === 0n}
-                  >Withdraw</OutlineButton>
-                  <OutlineButton
-                    onClick={() => setTopupOpen(true)}
-                    disabled={!eureWalletBalance || eureWalletBalance === 0n}
-                  >Top Up</OutlineButton>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <CardAddressCopy address={cardSafeAddress} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      {cardSafeBalance !== null && cardSafeBalance % (10n ** 16n) > 0n && delayModuleAddress && (
+                        <SweepViaDelayButton
+                          delayModuleAddress={delayModuleAddress as `0x${string}`}
+                          eureAddress={eureAsset!.address as `0x${string}`}
+                          sourceAddress={selectedAddress as `0x${string}`}
+                          dustAmount={cardSafeBalance % (10n ** 16n)}
+                          onSuccess={() => { loadPosition(); }}
+                        />
+                      )}
+                      <OutlineButton
+                        onClick={() => setWithdrawOpen(true)}
+                        disabled={!cardSafeBalance || cardSafeBalance === 0n}
+                      >Withdraw</OutlineButton>
+                      <OutlineButton
+                        onClick={() => setTopupOpen(true)}
+                        disabled={!eureWalletBalance || eureWalletBalance === 0n}
+                      >Top Up</OutlineButton>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -1556,14 +1544,21 @@ function DashboardPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
                   <TokenIcon symbol={eure.symbol} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{eure.symbol}</div>
-                    <div style={{ fontSize: 11, color: "var(--muted-text)" }}>up to {fmtToken(eure.maxAmount, eure.decimals)} EURe</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{eure.symbol}</span>
+                      <span style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", flexShrink: 0 }}>{fmtToken(eure.maxAmount, eure.decimals)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, color: "var(--muted-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>≈€{fmtEur(eure.maxAmountEur)} available</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        <ApyBadge apy={eure.apy} />
+                        <OutlineButton
+                          onClick={canTransact ? () => setSheet({ type: "borrow", asset: eure }) : undefined}
+                          disabled={!canTransact}
+                        >Borrow</OutlineButton>
+                      </div>
+                    </div>
                   </div>
-                  <ApyBadge apy={eure.apy} />
-                  <OutlineButton
-                    onClick={canTransact ? () => setSheet({ type: "borrow", asset: eure }) : undefined}
-                    disabled={!canTransact}
-                  >Borrow</OutlineButton>
                 </div>
               );
             })()}
