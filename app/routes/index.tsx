@@ -220,10 +220,12 @@ function OutlineButton({
   children,
   onClick,
   disabled,
+  style,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
     <button
@@ -242,6 +244,7 @@ function OutlineButton({
         transition: "opacity 0.15s",
         fontFamily: "inherit",
         whiteSpace: "nowrap",
+        ...style,
       }}
     >
       {children}
@@ -942,7 +945,7 @@ function TopUpSheet({
         <OutlineButton
           onClick={handleConfirm}
           disabled={!canConfirm}
-          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700, opacity: canConfirm ? 1 : 0.4 }}
+          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
         >
           {submitting ? "Sending…" : "Confirm Top Up"}
         </OutlineButton>
@@ -978,29 +981,7 @@ function DashboardPage() {
     setEureWalletBalance(null);
   }, [address]);
 
-  // Eager-load safes as soon as wallet connects
-  useEffect(() => {
-    loadSiblingsSafes();
-  }, [loadSiblingsSafes]);
-
-  // Check if the Circles safe is an owner of the selected sibling safe
-  useEffect(() => {
-    if (!selectedAddress || selectedAddress === address) {
-      setIsOwnerOfSelected(false);
-      return;
-    }
-    fetch(`https://api.safe.global/tx-service/gno/api/v1/safes/${selectedAddress}/`)
-      .then((r) => r.json())
-      .then((info) => {
-        const owners: string[] = info?.owners ?? [];
-        setIsOwnerOfSelected(
-          owners.some((o) => o.toLowerCase() === address?.toLowerCase()),
-        );
-      })
-      .catch(() => setIsOwnerOfSelected(false));
-  }, [selectedAddress, address]);
-
-  // Lazy-load safes where the Circles safe is itself listed as an owner
+  // Declare callbacks before the effects that reference them (avoids TDZ in the minified bundle)
   const loadSiblingsSafes = useCallback(async () => {
     if (!address || safesLoaded || safesLoading) return;
     setSafesLoading(true);
@@ -1029,6 +1010,28 @@ function DashboardPage() {
       setLoading(false);
     }
   }, [activeAddress]);
+
+  // Eager-load safes as soon as wallet connects
+  useEffect(() => {
+    loadSiblingsSafes();
+  }, [loadSiblingsSafes]);
+
+  // Check if the Circles safe is an owner of the selected sibling safe
+  useEffect(() => {
+    if (!selectedAddress || selectedAddress === address) {
+      setIsOwnerOfSelected(false);
+      return;
+    }
+    fetch(`https://api.safe.global/tx-service/gno/api/v1/safes/${selectedAddress}/`)
+      .then((r) => r.json())
+      .then((info) => {
+        const owners: string[] = info?.owners ?? [];
+        setIsOwnerOfSelected(
+          owners.some((o) => o.toLowerCase() === address?.toLowerCase()),
+        );
+      })
+      .catch(() => setIsOwnerOfSelected(false));
+  }, [selectedAddress, address]);
 
   useEffect(() => {
     loadPosition();
@@ -1231,26 +1234,26 @@ function DashboardPage() {
             <strong>View only.</strong> Your connected wallet is not an owner of this safe. Switch accounts in the Circles app to transact.
           </div>
         )}
-      </div>
 
-      {/* ── Wallet EURe balance ───────────────────────────────────────────── */}
-      {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
-        <div>
-          <SectionLabel>Wallet Balance</SectionLabel>
-          <Card>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
-              <TokenIcon symbol="EURe" />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
-                <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
-                  {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
+        {/* ── Wallet EURe balance ───────────────────────────────────────── */}
+        {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
+          <div>
+            <SectionLabel>Wallet Balance</SectionLabel>
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+                <TokenIcon symbol="EURe" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
+                    {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
+                  </div>
                 </div>
+                <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
               </div>
-              <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
-            </div>
-          </Card>
-        </div>
-      )}
+            </Card>
+          </div>
+        )}
+      </div>
 
       {/* ── Action sheet ──────────────────────────────────────────────────── */}
       <Sheet
