@@ -62,3 +62,6 @@ Desktop.ini
 *.pem
 .cache/
 .env*
+
+# Claude Code worktrees
+.claude/worktrees/

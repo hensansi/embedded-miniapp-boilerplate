@@ -9,9 +9,9 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <WalletProvider>
-      <AppShell>
+      <main className="min-h-screen p-3 sm:p-4">
         <Outlet />
-      </AppShell>
+      </main>
     </WalletProvider>
   );
 }

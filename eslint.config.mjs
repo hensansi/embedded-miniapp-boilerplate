@@ -18,6 +18,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: [".vinxi/**", ".output/**", "dist/**", "app/routeTree.gen.ts"],
+    ignores: [".vinxi/**", ".output/**", "dist/**", "app/routeTree.gen.ts", ".claude/**"],
   }
 );
