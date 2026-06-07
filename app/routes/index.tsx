@@ -2,14 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
-import { shortenAddress } from "@/lib/utils";
 import {
   fetchAavePosition,
   type AavePosition,
   type AssetPosition,
   type BorrowableAsset,
 } from "@/lib/aave";
-import { buildBorrowTx, buildRepayTx, MAX_REPAY_AMOUNT } from "@/lib/aave-actions";
+import {
+  buildBorrowTx,
+  buildRepayTx,
+  wrapInExecTransaction,
+  MAX_REPAY_AMOUNT,
+} from "@/lib/aave-actions";
 import {
   Sheet,
   SheetContent,
@@ -249,11 +253,15 @@ function AddressPicker({
   value,
   connectedAddress,
   onChange,
+  onOpen,
+  loading,
 }: {
   options: string[];
   value: string;
   connectedAddress: string;
   onChange: (v: string) => void;
+  onOpen?: () => void;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -275,7 +283,6 @@ function AddressPicker({
     });
   }
 
-  const canSwitch = options.length > 1;
   const label = (addr: string) =>
     addr === connectedAddress ? `${addr} (connected)` : addr;
 
@@ -284,7 +291,7 @@ function AddressPicker({
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {/* address + optional switcher */}
         <button
-          onClick={() => canSwitch && setOpen((v) => !v)}
+          onClick={() => { onOpen?.(); setOpen((v) => !v); }}
           style={{
             display: "flex",
             alignItems: "center",
@@ -295,18 +302,16 @@ function AddressPicker({
             background: "transparent",
             border: "none",
             padding: 0,
-            cursor: canSwitch ? "pointer" : "default",
+            cursor: "pointer",
             outline: "none",
             wordBreak: "break-all",
             textAlign: "left",
           }}
         >
           <span>{value}</span>
-          {canSwitch && (
-            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
-              <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          )}
+          <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+            <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </button>
         {/* copy button */}
         <button
@@ -352,6 +357,11 @@ function AddressPicker({
             minWidth: 300,
           }}
         >
+          {loading && (
+            <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted-text)" }}>
+              Loading safes…
+            </div>
+          )}
           {options.map((addr) => (
             <button
               key={addr}
@@ -387,7 +397,7 @@ function BorrowRow({
   onRepay,
 }: {
   asset: AssetPosition;
-  onRepay: () => void;
+  onRepay?: () => void;
 }) {
   return (
     <div
@@ -417,38 +427,39 @@ function BorrowRow({
         </div>
       </div>
       <ApyBadge apy={asset.apy} />
-      <OutlineButton onClick={onRepay}>Repay</OutlineButton>
+      <OutlineButton onClick={onRepay} disabled={!onRepay}>Repay</OutlineButton>
     </div>
   );
 }
 
 // ─── Borrowable tile (grid item) ─────────────────────────────────────────────
 
-function BorrowTile({
-  asset,
-  onBorrow,
-}: {
-  asset: BorrowableAsset;
-  onBorrow: () => void;
+// ─── Tx decoder row ──────────────────────────────────────────────────────────
+
+function TxRow({ label, contract, fn, params }: {
+  label: string;
+  contract: string;
+  fn: string;
+  params: { name: string; value: string }[];
 }) {
   return (
-    <Card style={{ padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <TokenIcon symbol={asset.symbol} />
-        <div>
-          <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 14 }}>
-            {asset.symbol}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted-text)" }}>
-            up to {fmtToken(asset.maxAmount, asset.decimals)} EURe
-          </div>
-        </div>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", marginBottom: 4, wordBreak: "break-all" }}>
+        Contract: {contract}
       </div>
-      <ApyBadge apy={asset.apy} />
-      <PrimaryButton onClick={onBorrow} style={{ marginTop: 12 }}>
-        Borrow
-      </PrimaryButton>
-    </Card>
+      <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 6 }}>
+        Function: <span style={{ fontFamily: "monospace" }}>{fn}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {params.map(({ name, value }) => (
+          <div key={name} style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 6, fontSize: 10 }}>
+            <span style={{ color: "var(--muted-text)" }}>{name}</span>
+            <span style={{ fontFamily: "monospace", wordBreak: "break-all", color: "var(--ink)" }}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -463,11 +474,15 @@ function ActionSheet({
   onClose,
   onSuccess,
   walletAddress,
+  position,
+  execViaSafe,
 }: {
   sheet: SheetState | null;
   onClose: () => void;
   onSuccess: () => void;
   walletAddress: string;
+  position: AavePosition | null;
+  execViaSafe?: { safe: `0x${string}`; signer: `0x${string}` };
 }) {
   const [input, setInput] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -488,29 +503,40 @@ function ActionSheet({
   const asset = sheet.asset;
   const decimals = asset.decimals;
 
-  const maxDisplay = isRepay
-    ? fmtToken((asset as AssetPosition).amount, decimals)
-    : fmtToken((asset as BorrowableAsset).maxAmount, decimals);
+  const maxRaw = isRepay
+    ? (asset as AssetPosition).amount
+    : (asset as BorrowableAsset).maxAmount;
 
   const maxEur = isRepay
     ? (asset as AssetPosition).amountEur
     : (asset as BorrowableAsset).maxAmountEur;
 
   const parsedInput = parseFloat(input) || 0;
-  const eurEquiv = isRepay
-    ? (parsedInput / (asset as AssetPosition).amount) * (asset as AssetPosition).amountEur
-    : (parsedInput / Math.max((asset as BorrowableAsset).maxAmount, 1e-18)) *
-      (asset as BorrowableAsset).maxAmountEur;
+  const eurPerUnit = maxRaw > 0 ? maxEur / maxRaw : 0;
+  const eurEquiv = parsedInput * eurPerUnit;
+
+  // Plain decimal string so number inputs parse it correctly (no locale commas)
+  function toInputStr(n: number): string {
+    const dp = Math.min(decimals, n < 1 ? 6 : n < 1000 ? 4 : 2);
+    return n.toFixed(dp);
+  }
 
   function handleMax() {
-    setInput(maxDisplay);
-    if (isRepay) setIsMax(true);
+    setInput(toInputStr(maxRaw));
+    setIsMax(true);
+  }
+
+  function handleQuick(amount: number) {
+    setInput(String(amount));
+    setIsMax(false);
   }
 
   function handleInputChange(val: string) {
     setInput(val);
     setIsMax(false);
   }
+
+  const quickAmounts = [100, 200, 300].filter((v) => v <= maxRaw);
 
   async function handleConfirm() {
     if (!input && !isMax) return;
@@ -531,6 +557,10 @@ function ActionSheet({
         txs = buildBorrowTx((asset as BorrowableAsset).address, amountWei, addr);
       }
 
+      if (execViaSafe) {
+        txs = txs.map((tx) => wrapInExecTransaction(tx, execViaSafe.safe, execViaSafe.signer));
+      }
+
       await sendTransactions(txs);
       onClose();
       onSuccess();
@@ -544,8 +574,34 @@ function ActionSheet({
   const canConfirm = (isMax || parsedInput > 0) && !submitting;
   const title = isRepay ? `Repay ${asset.symbol}` : `Borrow ${asset.symbol}`;
   const subtitle = isRepay
-    ? `Current debt: ≈€${fmtEur(maxEur)}`
-    : `Max available: ≈€${fmtEur(maxEur)}`;
+    ? `Current debt: €${fmtEur(maxEur)}`
+    : `Max available: €${fmtEur(maxEur)}`;
+
+  // Projected health factor after this action
+  const currentHF = position?.healthFactor ?? Infinity;
+  const currentDebtEur = position?.totalDebtEur ?? 0;
+  const actionEur = isMax ? maxEur : eurEquiv;
+  let projectedHF: number | null = null;
+  if (canConfirm && isFinite(currentHF) && currentDebtEur > 0) {
+    if (isRepay) {
+      const newDebt = Math.max(currentDebtEur - actionEur, 0);
+      projectedHF = newDebt < 0.001 ? Infinity : (currentHF * currentDebtEur) / newDebt;
+    } else {
+      projectedHF = actionEur > 0 ? (currentHF * currentDebtEur) / (currentDebtEur + actionEur) : null;
+    }
+  }
+
+  // Build the actual transactions so calldata shown matches exactly what will be submitted
+  let previewTxs: { to: `0x${string}`; data: `0x${string}` }[] = [];
+  if (canConfirm) {
+    const addr = walletAddress as `0x${string}`;
+    if (isRepay) {
+      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
+      previewTxs = buildRepayTx((asset as AssetPosition).address, amountWei, addr);
+    } else {
+      previewTxs = buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
+    }
+  }
 
   return (
     <>
@@ -607,10 +663,113 @@ function ActionSheet({
           </button>
         </div>
 
-        <div style={{ fontSize: 12, color: "var(--muted-text)", marginTop: 6, paddingLeft: 4 }}>
-          ≈ €{fmtEur(isMax ? maxEur : eurEquiv)}
-        </div>
+        {quickAmounts.length > 0 && (
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            {quickAmounts.map((v) => (
+              <button
+                key={v}
+                onClick={() => handleQuick(v)}
+                style={{
+                  flex: 1,
+                  background: parsedInput === v && !isMax ? "var(--accent-soft)" : "transparent",
+                  color: parsedInput === v && !isMax ? "var(--accent-brand)" : "var(--muted-text)",
+                  border: `1px solid ${parsedInput === v && !isMax ? "var(--accent-brand)" : "var(--line)"}`,
+                  borderRadius: "var(--radius-pill)",
+                  padding: "6px 0",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "background 0.15s, color 0.15s, border-color 0.15s",
+                }}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {canConfirm && (
+        <div style={{ padding: "0 20px 12px" }}>
+          <div
+            style={{
+              background: "#f8f7ff",
+              border: "1px solid var(--accent-soft)",
+              borderRadius: 14,
+              padding: "14px 16px",
+              fontSize: 13,
+              color: "var(--ink)",
+              lineHeight: 1.7,
+            }}
+          >
+            {/* Action summary row */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Action</span>
+              <span style={{ fontWeight: 700 }}>
+                {isRepay ? "Repay" : "Borrow"} {isMax ? fmtToken(maxRaw, decimals) : input} {asset.symbol}
+              </span>
+            </div>
+
+            {/* EUR value */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Value</span>
+              <span style={{ fontWeight: 600 }}>€{fmtEur(isMax ? maxEur : eurEquiv)}</span>
+            </div>
+
+            {/* Health factor change */}
+            {projectedHF !== null && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Health factor</span>
+                <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>{isFinite(currentHF) ? currentHF.toFixed(2) : "∞"}</span>
+                  <span style={{ color: "var(--muted-text)" }}>→</span>
+                  <span style={{
+                    color: !isFinite(projectedHF) ? "#145324"
+                      : projectedHF >= 2 ? "#145324"
+                      : projectedHF >= 1.5 ? "#8a482c"
+                      : "#7f1d1d",
+                  }}>
+                    {!isFinite(projectedHF) ? "∞" : projectedHF.toFixed(2)}
+                  </span>
+                  {isFinite(projectedHF) && projectedHF < 1.5 && (
+                    <span style={{ fontSize: 11, color: "#7f1d1d" }}>⚠ risk of liquidation</span>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Divider */}
+            <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
+
+            {/* Decoded transactions — parameters we passed when building the txs */}
+            <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+              {isRepay ? (
+                <>
+                  <TxRow label="Tx 1 — ERC-20 approve" contract={asset.address} fn="approve(spender, amount)" params={[
+                    { name: "spender (Aave Pool)", value: previewTxs[0]?.to ?? "" },
+                    { name: "amount", value: isMax ? "max (full debt repayment)" : `${input} ${asset.symbol}` },
+                  ]} />
+                  <TxRow label="Tx 2 — Aave Pool repay" contract={previewTxs[1]?.to ?? ""} fn="repay(asset, amount, rateMode, onBehalfOf)" params={[
+                    { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                    { name: "amount", value: isMax ? "max (full debt + accrued interest)" : `${input} ${asset.symbol}` },
+                    { name: "rateMode", value: "2 — variable rate" },
+                    { name: "onBehalfOf", value: walletAddress },
+                  ]} />
+                </>
+              ) : (
+                <TxRow label="Tx 1 — Aave Pool borrow" contract={previewTxs[0]?.to ?? ""} fn="borrow(asset, amount, rateMode, referral, onBehalfOf)" params={[
+                  { name: "asset", value: `${asset.symbol} (${asset.address})` },
+                  { name: "amount", value: `${input} ${asset.symbol}` },
+                  { name: "rateMode", value: "2 — variable rate" },
+                  { name: "referralCode", value: "0" },
+                  { name: "onBehalfOf", value: walletAddress },
+                ]} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ padding: "0 20px 24px" }}>
         {txError && (
@@ -628,8 +787,13 @@ function ActionSheet({
           </div>
         )}
         <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
-          {submitting ? <Spinner /> : "Confirm"}
+          {submitting ? <Spinner /> : "Send to Circles wallet →"}
         </PrimaryButton>
+        {!submitting && canConfirm && (
+          <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted-text)", marginTop: 8 }}>
+            Circles will ask you to approve the transaction
+          </div>
+        )}
       </div>
     </>
   );
@@ -640,70 +804,57 @@ function ActionSheet({
 function DashboardPage() {
   const { address, isConnected } = useWallet();
   const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
+  const [safesLoading, setSafesLoading] = useState(false);
+  const [safesLoaded, setSafesLoaded] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
+  const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
 
   const activeAddress = selectedAddress ?? address;
 
+  // Reset on wallet change
   useEffect(() => {
-    if (!address) return;
     setSelectedAddress(null);
-
-    const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
-
-    async function loadRelatedSafes() {
-      const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-      // Get connected Safe's owners
-      const safeInfo = await fetch(`${BASE}/safes/${address}/`)
-        .then((r) => r.json()).catch(() => null);
-      const owners: string[] = safeInfo?.owners ?? [];
-
-      const candidates = new Set<string>();
-
-      for (const owner of owners) {
-        await pause(150);
-
-        // Skip if owner is itself a Safe
-        const isSafe = await fetch(`${BASE}/safes/${owner}/`)
-          .then((r) => r.ok).catch(() => false);
-        if (isSafe) continue;
-
-        await pause(150);
-
-        // Get safes owned by this EOA
-        const res = await fetch(`${BASE}/owners/${owner}/safes/`)
-          .then((r) => r.json()).catch(() => ({ safes: [] }));
-        const safes: string[] = res.safes ?? [];
-
-        // Skip protocol/relayer addresses — a personal passkey owns at most a handful
-        if (safes.length > 10) continue;
-
-        for (const s of safes) {
-          if (s !== address) candidates.add(s);
-        }
-      }
-
-      // Keep only addresses registered in the Circles protocol
-      const circlesSafes: string[] = [];
-      for (const s of candidates) {
-        await pause(100);
-        const view = await fetch('https://rpc.aboutcircles.com/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'circles_getProfileView', params: [s] }),
-        }).then((r) => r.json()).catch(() => null);
-        if (view?.result?.avatarInfo) circlesSafes.push(s);
-      }
-
-      setOwnedSafes(circlesSafes);
-    }
-
-    loadRelatedSafes();
+    setOwnedSafes([]);
+    setSafesLoaded(false);
+    setIsOwnerOfSelected(false);
   }, [address]);
+
+  // Check if the Circles safe is an owner of the selected sibling safe
+  useEffect(() => {
+    if (!selectedAddress || selectedAddress === address) {
+      setIsOwnerOfSelected(false);
+      return;
+    }
+    fetch(`https://api.safe.global/tx-service/gno/api/v1/safes/${selectedAddress}/`)
+      .then((r) => r.json())
+      .then((info) => {
+        const owners: string[] = info?.owners ?? [];
+        setIsOwnerOfSelected(
+          owners.some((o) => o.toLowerCase() === address?.toLowerCase()),
+        );
+      })
+      .catch(() => setIsOwnerOfSelected(false));
+  }, [selectedAddress, address]);
+
+  // Lazy-load safes where the Circles safe is itself listed as an owner
+  const loadSiblingsSafes = useCallback(async () => {
+    if (!address || safesLoaded || safesLoading) return;
+    setSafesLoading(true);
+    const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
+    try {
+      const res = await fetch(`${BASE}/owners/${address}/safes/`)
+        .then((r) => r.json()).catch(() => ({ safes: [] }));
+      const safes: string[] = (res.safes ?? []).filter((s: string) => s !== address);
+      setOwnedSafes(safes);
+    } finally {
+      setSafesLoading(false);
+      setSafesLoaded(true);
+    }
+  }, [address, safesLoaded, safesLoading]);
 
   const loadPosition = useCallback(async () => {
     if (!activeAddress) return;
@@ -724,6 +875,10 @@ function DashboardPage() {
   }, [loadPosition]);
 
   const allSafes = address ? [address, ...ownedSafes] : [];
+  // Borrow/repay are available when:
+  // - viewing own address, OR
+  // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
+  const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -822,10 +977,12 @@ function DashboardPage() {
           {activeAddress && (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-soft)" }}>
               <AddressPicker
-                options={allSafes.length ? allSafes : [activeAddress]}
-                value={activeAddress}
+                options={allSafes.length ? allSafes : [activeAddress ?? ""]}
+                value={activeAddress ?? ""}
                 connectedAddress={address ?? ""}
                 onChange={setSelectedAddress}
+                onOpen={loadSiblingsSafes}
+                loading={safesLoading}
               />
             </div>
           )}
@@ -851,7 +1008,7 @@ function DashboardPage() {
                 <BorrowRow
                   key={b.address}
                   asset={b}
-                  onRepay={() => setSheet({ type: "repay", asset: b })}
+                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
                 />
               ))
             )}
@@ -877,12 +1034,30 @@ function DashboardPage() {
                     <div style={{ fontSize: 11, color: "var(--muted-text)" }}>up to {fmtToken(eure.maxAmount, eure.decimals)} EURe</div>
                   </div>
                   <ApyBadge apy={eure.apy} />
-                  <OutlineButton onClick={() => setSheet({ type: "borrow", asset: eure })}>Borrow</OutlineButton>
+                  <OutlineButton
+                    onClick={canTransact ? () => setSheet({ type: "borrow", asset: eure }) : undefined}
+                    disabled={!canTransact}
+                  >Borrow</OutlineButton>
                 </div>
               );
             })()}
           </Card>
         </div>
+
+        {/* ── Read-only notice ──────────────────────────────────────────── */}
+        {selectedAddress && selectedAddress !== address && !isOwnerOfSelected && (
+          <div style={{
+            background: "#fef9c3",
+            border: "1px solid #fde047",
+            borderRadius: 12,
+            padding: "12px 16px",
+            fontSize: 13,
+            color: "#713f12",
+            lineHeight: 1.5,
+          }}>
+            <strong>View only.</strong> Your connected wallet is not an owner of this safe. Switch accounts in the Circles app to transact.
+          </div>
+        )}
       </div>
 
       {/* ── Action sheet ──────────────────────────────────────────────────── */}
@@ -895,7 +1070,13 @@ function DashboardPage() {
             sheet={sheet}
             onClose={() => setSheet(null)}
             onSuccess={loadPosition}
-            walletAddress={address ?? ""}
+            walletAddress={activeAddress ?? ""}
+            position={position}
+            execViaSafe={
+              isOwnerOfSelected && selectedAddress && address
+                ? { safe: selectedAddress as `0x${string}`, signer: address as `0x${string}` }
+                : undefined
+            }
           />
         </SheetContent>
       </Sheet>
