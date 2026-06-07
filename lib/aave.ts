@@ -149,6 +149,27 @@ export interface AavePosition {
   healthFactor: number;
 }
 
+const ERC20_BALANCE_ABI = [
+  {
+    inputs: [{ name: 'account', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export async function fetchErc20Balance(
+  token: `0x${string}`,
+  owner: `0x${string}`,
+  c: AaveClient = defaultClient,
+): Promise<bigint> {
+  const result = await c.multicall({
+    contracts: [{ address: token, abi: ERC20_BALANCE_ABI, functionName: 'balanceOf', args: [owner] }],
+  });
+  return (result[0].status === 'success' ? result[0].result : 0n) as bigint;
+}
+
 export async function fetchAavePosition(
   user: `0x${string}`,
   c: AaveClient = defaultClient,

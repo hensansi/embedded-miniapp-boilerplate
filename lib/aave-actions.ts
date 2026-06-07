@@ -43,7 +43,28 @@ const ERC20_ABI = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  {
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    name: 'transfer',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;
+
+export function buildErc20TransferTx(
+  token: `0x${string}`,
+  to: `0x${string}`,
+  amount: bigint,
+): { to: `0x${string}`; data: `0x${string}` } {
+  return {
+    to: token,
+    data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
+  };
+}
 
 const SAFE_EXEC_ABI = [
   {

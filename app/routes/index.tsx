@@ -4,6 +4,7 @@ import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import {
   fetchAavePosition,
+  fetchErc20Balance,
   type AavePosition,
   type AssetPosition,
   type BorrowableAsset,
@@ -11,9 +12,11 @@ import {
 import {
   buildBorrowTx,
   buildRepayTx,
+  buildErc20TransferTx,
   wrapInExecTransaction,
   MAX_REPAY_AMOUNT,
 } from "@/lib/aave-actions";
+
 import {
   Sheet,
   SheetContent,
@@ -799,6 +802,152 @@ function ActionSheet({
   );
 }
 
+// ─── Top Up sheet ────────────────────────────────────────────────────────────
+
+function TopUpSheet({
+  safeAddress,
+  signerAddress,
+  eureBalance,
+  eureAddress,
+  onClose,
+  onSuccess,
+}: {
+  safeAddress: `0x${string}`;
+  signerAddress: `0x${string}`;
+  eureBalance: bigint;
+  eureAddress: `0x${string}`;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [destination, setDestination] = useState(() =>
+    localStorage.getItem("topup_destination") ?? "",
+  );
+  const [amount, setAmount] = useState("");
+  const [isMax, setIsMax] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+
+  const balanceHuman = Number(eureBalance) / 1e18;
+  const parsedAmount = parseFloat(amount) || 0;
+  const amountWei = isMax ? eureBalance : parseUnits(amount || "0", 18);
+  const canConfirm =
+    destination.startsWith("0x") &&
+    destination.length === 42 &&
+    (isMax || parsedAmount > 0) &&
+    !submitting;
+
+  function handleMax() {
+    const dp = balanceHuman < 1 ? 6 : balanceHuman < 1000 ? 4 : 2;
+    setAmount(balanceHuman.toFixed(dp));
+    setIsMax(true);
+  }
+
+  async function handleConfirm() {
+    if (!canConfirm) return;
+    setSubmitting(true);
+    setTxError(null);
+    localStorage.setItem("topup_destination", destination);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const inner = buildErc20TransferTx(eureAddress, destination as `0x${string}`, amountWei);
+      const tx = wrapInExecTransaction(inner, safeAddress, signerAddress);
+      await sendTransactions([tx]);
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <SheetHeader style={{ padding: "20px 20px 0" }}>
+        <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>Top Up</SheetTitle>
+        <SheetDescription style={{ color: "var(--muted-text)", fontSize: 13 }}>
+          Transfer EURe from this safe to another address
+        </SheetDescription>
+      </SheetHeader>
+
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Destination */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Destination address</div>
+          <input
+            type="text"
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder="0x…"
+            style={{
+              width: "100%",
+              fontSize: 12,
+              fontFamily: "monospace",
+              border: "1px solid var(--line)",
+              borderRadius: 10,
+              padding: "10px 14px",
+              outline: "none",
+              background: "transparent",
+              color: "var(--ink)",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        {/* Amount */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>
+            Amount — {fmtToken(balanceHuman, 18)} EURe available
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid var(--line)", borderRadius: 12, padding: "4px 4px 4px 16px" }}>
+            <input
+              type="number"
+              min="0"
+              value={amount}
+              onChange={(e) => { setAmount(e.target.value); setIsMax(false); }}
+              placeholder="0.00"
+              style={{ flex: 1, fontSize: 28, fontWeight: 600, border: "none", outline: "none", background: "transparent", color: "var(--ink)", fontFamily: "inherit", minWidth: 0 }}
+            />
+            <button
+              onClick={handleMax}
+              style={{ background: "var(--accent-soft)", color: "var(--accent-brand)", border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
+            >MAX</button>
+          </div>
+        </div>
+
+        {/* Preview */}
+        {canConfirm && (
+          <div style={{ background: "#f8f7ff", border: "1px solid var(--accent-soft)", borderRadius: 14, padding: "14px 16px" }}>
+            <TxRow
+              label="Safe execTransaction → ERC-20 transfer"
+              contract={safeAddress}
+              fn="execTransaction(to, value, data, operation, …, signatures)"
+              params={[
+                { name: "inner — token", value: `EURe (${eureAddress})` },
+                { name: "inner — to", value: destination },
+                { name: "inner — amount", value: isMax ? `${fmtToken(balanceHuman, 18)} EURe (full balance)` : `${amount} EURe` },
+              ]}
+            />
+          </div>
+        )}
+
+        {txError && (
+          <div style={{ background: "#fee2e2", color: "#7f1d1d", fontSize: 13, padding: "10px 14px", borderRadius: 10 }}>
+            {txError}
+          </div>
+        )}
+
+        <OutlineButton
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700, opacity: canConfirm ? 1 : 0.4 }}
+        >
+          {submitting ? "Sending…" : "Confirm Top Up"}
+        </OutlineButton>
+      </div>
+    </>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 function DashboardPage() {
@@ -812,6 +961,8 @@ function DashboardPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
 
   const activeAddress = selectedAddress ?? address;
 
@@ -821,7 +972,13 @@ function DashboardPage() {
     setOwnedSafes([]);
     setSafesLoaded(false);
     setIsOwnerOfSelected(false);
+    setEureWalletBalance(null);
   }, [address]);
+
+  // Eager-load safes as soon as wallet connects
+  useEffect(() => {
+    loadSiblingsSafes();
+  }, [loadSiblingsSafes]);
 
   // Check if the Circles safe is an owner of the selected sibling safe
   useEffect(() => {
@@ -873,6 +1030,19 @@ function DashboardPage() {
   useEffect(() => {
     loadPosition();
   }, [loadPosition]);
+
+  // Fetch EURe wallet balance of the active safe whenever position or address changes
+  useEffect(() => {
+    if (!activeAddress || !position) { setEureWalletBalance(null); return; }
+    const eureAsset =
+      position.borrows.find((b) => b.symbol === 'EURe') ??
+      position.borrowable.find((b) => b.symbol === 'EURe') ??
+      position.supplies.find((b) => b.symbol === 'EURe');
+    if (!eureAsset) { setEureWalletBalance(null); return; }
+    fetchErc20Balance(eureAsset.address as `0x${string}`, activeAddress as `0x${string}`)
+      .then(setEureWalletBalance)
+      .catch(() => setEureWalletBalance(null));
+  }, [activeAddress, position]);
 
   const allSafes = address ? [address, ...ownedSafes] : [];
   // Borrow/repay are available when:
@@ -1060,6 +1230,25 @@ function DashboardPage() {
         )}
       </div>
 
+      {/* ── Top Up card ───────────────────────────────────────────────────── */}
+      {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
+        <div>
+          <SectionLabel>Wallet Balance</SectionLabel>
+          <Card>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+              <TokenIcon symbol="EURe" />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
+                <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
+                  {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
+                </div>
+              </div>
+              <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* ── Action sheet ──────────────────────────────────────────────────── */}
       <Sheet
         open={sheet !== null}
@@ -1078,6 +1267,29 @@ function DashboardPage() {
                 : undefined
             }
           />
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Top Up sheet ──────────────────────────────────────────────────── */}
+      <Sheet
+        open={topupOpen}
+        onOpenChange={(open: boolean) => { if (!open) setTopupOpen(false); }}
+      >
+        <SheetContent side="bottom" showCloseButton>
+          {isOwnerOfSelected && selectedAddress && address && eureWalletBalance !== null && position && (
+            <TopUpSheet
+              safeAddress={selectedAddress as `0x${string}`}
+              signerAddress={address as `0x${string}`}
+              eureBalance={eureWalletBalance}
+              eureAddress={(
+                position.borrows.find((b) => b.symbol === 'EURe') ??
+                position.borrowable.find((b) => b.symbol === 'EURe') ??
+                position.supplies.find((b) => b.symbol === 'EURe')
+              )?.address as `0x${string}`}
+              onClose={() => setTopupOpen(false)}
+              onSuccess={() => { setTopupOpen(false); loadPosition(); }}
+            />
+          )}
         </SheetContent>
       </Sheet>
     </>
