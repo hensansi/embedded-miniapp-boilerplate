@@ -972,6 +972,14 @@ function TopUpSheet({
               style={{ background: "var(--accent-soft)", color: "var(--accent-brand)", border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
             >MAX</button>
           </div>
+          {parsedAmount > 0 && !Number.isInteger(parsedAmount * 100) && (
+            <button
+              onClick={() => setAmount((Math.floor(parsedAmount * 100) / 100).toFixed(2))}
+              style={{ marginTop: 6, background: "none", border: "none", color: "var(--accent-brand)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0 }}
+            >
+              Trim to cents → {(Math.floor(parsedAmount * 100) / 100).toFixed(2)}
+            </button>
+          )}
         </div>
 
 
