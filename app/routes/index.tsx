@@ -2,14 +2,21 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
-import { shortenAddress } from "@/lib/utils";
 import {
   fetchAavePosition,
   type AavePosition,
   type AssetPosition,
   type BorrowableAsset,
 } from "@/lib/aave";
-import { buildBorrowTx, buildRepayTx, MAX_REPAY_AMOUNT } from "@/lib/aave-actions";
+import {
+  buildBorrowTx,
+  buildRepayTx,
+  MAX_REPAY_AMOUNT,
+  POOL,
+  SELECTOR_BORROW,
+  SELECTOR_REPAY,
+  SELECTOR_APPROVE,
+} from "@/lib/aave-actions";
 import {
   Sheet,
   SheetContent,
@@ -424,34 +431,6 @@ function BorrowRow({
 
 // ─── Borrowable tile (grid item) ─────────────────────────────────────────────
 
-function BorrowTile({
-  asset,
-  onBorrow,
-}: {
-  asset: BorrowableAsset;
-  onBorrow: () => void;
-}) {
-  return (
-    <Card style={{ padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <TokenIcon symbol={asset.symbol} />
-        <div>
-          <div style={{ fontWeight: 700, color: "var(--ink)", fontSize: 14 }}>
-            {asset.symbol}
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted-text)" }}>
-            up to {fmtToken(asset.maxAmount, asset.decimals)} EURe
-          </div>
-        </div>
-      </div>
-      <ApyBadge apy={asset.apy} />
-      <PrimaryButton onClick={onBorrow} style={{ marginTop: 12 }}>
-        Borrow
-      </PrimaryButton>
-    </Card>
-  );
-}
-
 // ─── Action sheet ────────────────────────────────────────────────────────────
 
 type SheetState =
@@ -463,11 +442,13 @@ function ActionSheet({
   onClose,
   onSuccess,
   walletAddress,
+  position,
 }: {
   sheet: SheetState | null;
   onClose: () => void;
   onSuccess: () => void;
   walletAddress: string;
+  position: AavePosition | null;
 }) {
   const [input, setInput] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -557,6 +538,20 @@ function ActionSheet({
   const subtitle = isRepay
     ? `Current debt: €${fmtEur(maxEur)}`
     : `Max available: €${fmtEur(maxEur)}`;
+
+  // Projected health factor after this action
+  const currentHF = position?.healthFactor ?? Infinity;
+  const currentDebtEur = position?.totalDebtEur ?? 0;
+  const actionEur = isMax ? maxEur : eurEquiv;
+  let projectedHF: number | null = null;
+  if (canConfirm && isFinite(currentHF) && currentDebtEur > 0) {
+    if (isRepay) {
+      const newDebt = Math.max(currentDebtEur - actionEur, 0);
+      projectedHF = newDebt < 0.001 ? Infinity : (currentHF * currentDebtEur) / newDebt;
+    } else {
+      projectedHF = actionEur > 0 ? (currentHF * currentDebtEur) / (currentDebtEur + actionEur) : null;
+    }
+  }
 
   return (
     <>
@@ -649,35 +644,71 @@ function ActionSheet({
         <div style={{ padding: "0 20px 12px" }}>
           <div
             style={{
-              background: "var(--accent-soft)",
-              borderRadius: 12,
-              padding: "12px 14px",
-              fontSize: 12,
-              color: "var(--muted-text)",
-              lineHeight: 1.6,
+              background: "#f8f7ff",
+              border: "1px solid var(--accent-soft)",
+              borderRadius: 14,
+              padding: "14px 16px",
+              fontSize: 13,
+              color: "var(--ink)",
+              lineHeight: 1.7,
             }}
           >
-            <div style={{ fontWeight: 700, color: "var(--ink)", marginBottom: 4, fontSize: 13 }}>
-              You are {isRepay ? "repaying" : "borrowing"}{" "}
-              <span style={{ color: "var(--accent-brand)" }}>
-                {isMax ? fmtToken(maxRaw, decimals) : input} {asset.symbol}
+            {/* Action summary row */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Action</span>
+              <span style={{ fontWeight: 700 }}>
+                {isRepay ? "Repay" : "Borrow"} {isMax ? fmtToken(maxRaw, decimals) : input} {asset.symbol}
               </span>
-              {isRepay ? " to" : " from"} Aave V3 · Gnosis
             </div>
-            {isRepay ? (
-              <>
-                <div style={{ fontFamily: "monospace", fontSize: 11, marginTop: 6 }}>
-                  Tx 1 — {asset.address.slice(0, 10)}…{"  "}0x095ea7b3 (approve)
-                </div>
-                <div style={{ fontFamily: "monospace", fontSize: 11 }}>
-                  Tx 2 — 0xb50201…26d8{"  "}0x573ade81 (repay)
-                </div>
-              </>
-            ) : (
-              <div style={{ fontFamily: "monospace", fontSize: 11, marginTop: 6 }}>
-                Tx 1 — 0xb50201…26d8{"  "}0xa415bcad (borrow)
+
+            {/* EUR value */}
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Value</span>
+              <span style={{ fontWeight: 600 }}>€{fmtEur(isMax ? maxEur : eurEquiv)}</span>
+            </div>
+
+            {/* Health factor change */}
+            {projectedHF !== null && (
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                <span style={{ color: "var(--muted-text)", fontSize: 12 }}>Health factor</span>
+                <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>{isFinite(currentHF) ? currentHF.toFixed(2) : "∞"}</span>
+                  <span style={{ color: "var(--muted-text)" }}>→</span>
+                  <span style={{
+                    color: !isFinite(projectedHF) ? "#145324"
+                      : projectedHF >= 2 ? "#145324"
+                      : projectedHF >= 1.5 ? "#8a482c"
+                      : "#7f1d1d",
+                  }}>
+                    {!isFinite(projectedHF) ? "∞" : projectedHF.toFixed(2)}
+                  </span>
+                  {isFinite(projectedHF) && projectedHF < 1.5 && (
+                    <span style={{ fontSize: 11, color: "#7f1d1d" }}>⚠ risk of liquidation</span>
+                  )}
+                </span>
               </div>
             )}
+
+            {/* Divider */}
+            <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
+
+            {/* Raw tx details — derived from the same constants used to build the txs */}
+            <div style={{ fontSize: 10, color: "var(--muted-text)", fontFamily: "monospace", lineHeight: 2, wordBreak: "break-all" }}>
+              {isRepay ? (
+                <>
+                  <div>Tx 1 · to: {asset.address}</div>
+                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_APPROVE} (approve)</div>
+                  <div style={{ marginTop: 4 }}>Tx 2 · to: {POOL}</div>
+                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_REPAY} (repay)</div>
+                </>
+              ) : (
+                <>
+                  <div>Tx 1 · to: {POOL}</div>
+                  <div style={{ paddingLeft: 8 }}>fn: {SELECTOR_BORROW} (borrow)</div>
+                </>
+              )}
+              <div style={{ marginTop: 4 }}>Protocol: Aave V3 · Gnosis Chain</div>
+            </div>
           </div>
         </div>
       )}
@@ -757,19 +788,7 @@ function DashboardPage() {
         }
       }
 
-      // Keep only addresses registered in the Circles protocol
-      const circlesSafes: string[] = [];
-      for (const s of candidates) {
-        await pause(100);
-        const view = await fetch('https://rpc.aboutcircles.com/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'circles_getProfileView', params: [s] }),
-        }).then((r) => r.json()).catch(() => null);
-        if (view?.result?.avatarInfo) circlesSafes.push(s);
-      }
-
-      setOwnedSafes(circlesSafes);
+      setOwnedSafes([...candidates]);
     }
 
     loadRelatedSafes();
@@ -966,6 +985,7 @@ function DashboardPage() {
             onClose={() => setSheet(null)}
             onSuccess={loadPosition}
             walletAddress={address ?? ""}
+            position={position}
           />
         </SheetContent>
       </Sheet>
