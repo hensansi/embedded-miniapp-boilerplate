@@ -842,8 +842,7 @@ function TopUpSheet({
     !submitting;
 
   function handleMax() {
-    const dp = balanceHuman < 1 ? 6 : balanceHuman < 1000 ? 4 : 2;
-    setAmount(balanceHuman.toFixed(dp));
+    setAmount((Math.floor(balanceHuman * 100) / 100).toFixed(2));
     setIsMax(true);
   }
 
