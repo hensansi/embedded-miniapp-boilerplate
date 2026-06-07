@@ -4,6 +4,8 @@ export const POOL = '0xb50201558B00496A145fE76f7424749556E326D8' as const;
 
 export const MAX_REPAY_AMOUNT = 2n ** 256n - 1n;
 
+const _zero = '0x0000000000000000000000000000000000000000' as const;
+
 const POOL_ABI = [
   {
     inputs: [
@@ -111,7 +113,6 @@ export function wrapInExecTransaction(
 }
 
 // Selectors derived from the ABIs above — slice the first 4 bytes of encoded calldata
-const _zero = '0x0000000000000000000000000000000000000000' as const;
 export const SELECTOR_BORROW = encodeFunctionData({ abi: POOL_ABI, functionName: 'borrow', args: [_zero, 0n, 2n, 0, _zero] }).slice(0, 10) as `0x${string}`;
 export const SELECTOR_REPAY  = encodeFunctionData({ abi: POOL_ABI, functionName: 'repay',  args: [_zero, 0n, 2n, _zero] }).slice(0, 10) as `0x${string}`;
 export const SELECTOR_APPROVE = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [_zero, 0n] }).slice(0, 10) as `0x${string}`;

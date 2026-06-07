@@ -819,9 +819,11 @@ function TopUpSheet({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [destination, setDestination] = useState(() =>
-    localStorage.getItem("topup_destination") ?? "",
-  );
+  const [destination, setDestination] = useState("");
+  useEffect(() => {
+    const stored = localStorage.getItem("topup_destination");
+    if (stored) setDestination(stored);
+  }, []);
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [submitting, setSubmitting] = useState(false);
