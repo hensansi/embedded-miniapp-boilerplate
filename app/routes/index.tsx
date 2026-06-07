@@ -503,23 +503,38 @@ function ActionSheet({
     }
   }, [sheet]);
 
-  if (!sheet) return null;
-
-  const isRepay = sheet.type === "repay";
-  const asset = sheet.asset;
-  const decimals = asset.decimals;
+  // Derive values with null-safe guards so they can live before the early return
+  // (hooks must not be called conditionally, so useMemo must precede `if (!sheet) return null`)
+  const isRepay = sheet?.type === "repay";
+  const asset = sheet?.asset ?? null;
+  const decimals = asset?.decimals ?? 18;
 
   const maxRaw = isRepay
-    ? (asset as AssetPosition).amount
-    : (asset as BorrowableAsset).maxAmount;
+    ? (asset as AssetPosition | null)?.amount ?? 0
+    : (asset as BorrowableAsset | null)?.maxAmount ?? 0;
 
   const maxEur = isRepay
-    ? (asset as AssetPosition).amountEur
-    : (asset as BorrowableAsset).maxAmountEur;
+    ? (asset as AssetPosition | null)?.amountEur ?? 0
+    : (asset as BorrowableAsset | null)?.maxAmountEur ?? 0;
 
   const parsedInput = parseFloat(input) || 0;
   const eurPerUnit = maxRaw > 0 ? maxEur / maxRaw : 0;
   const eurEquiv = parsedInput * eurPerUnit;
+  const canConfirm = (isMax || parsedInput > 0) && !submitting;
+
+  // Build preview transactions — memoized so ABI encoding only runs when inputs actually change,
+  // not on every re-render caused by unrelated state (e.g. submitting toggle, error message).
+  const previewTxs = useMemo((): { to: `0x${string}`; data: `0x${string}` }[] => {
+    if (!canConfirm || !asset) return [];
+    const addr = walletAddress as `0x${string}`;
+    if (isRepay) {
+      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
+      return buildRepayTx((asset as AssetPosition).address, amountWei, addr);
+    }
+    return buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
+  }, [canConfirm, isRepay, isMax, input, decimals, walletAddress, asset]);
+
+  if (!sheet || !asset) return null;
 
   // Plain decimal string so number inputs parse it correctly (no locale commas)
   function toInputStr(n: number): string {
@@ -577,7 +592,6 @@ function ActionSheet({
     }
   }
 
-  const canConfirm = (isMax || parsedInput > 0) && !submitting;
   const title = isRepay ? `Repay ${asset.symbol}` : `Borrow ${asset.symbol}`;
   const subtitle = isRepay
     ? `Current debt: €${fmtEur(maxEur)}`
@@ -594,18 +608,6 @@ function ActionSheet({
       projectedHF = newDebt < 0.001 ? Infinity : (currentHF * currentDebtEur) / newDebt;
     } else {
       projectedHF = actionEur > 0 ? (currentHF * currentDebtEur) / (currentDebtEur + actionEur) : null;
-    }
-  }
-
-  // Build the actual transactions so calldata shown matches exactly what will be submitted
-  let previewTxs: { to: `0x${string}`; data: `0x${string}` }[] = [];
-  if (canConfirm) {
-    const addr = walletAddress as `0x${string}`;
-    if (isRepay) {
-      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
-      previewTxs = buildRepayTx((asset as AssetPosition).address, amountWei, addr);
-    } else {
-      previewTxs = buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
     }
   }
 
@@ -821,12 +823,7 @@ function TopUpSheet({
   defaultDestination?: string;
   onSuccess: () => void;
 }) {
-  const [destination, setDestination] = useState(defaultDestination ?? "");
-  useEffect(() => {
-    const stored = localStorage.getItem("topup_destination");
-    if (stored) setDestination(stored);
-    else if (defaultDestination) setDestination(defaultDestination);
-  }, [defaultDestination]);
+  const [destination] = useState(defaultDestination ?? "");
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -850,7 +847,6 @@ function TopUpSheet({
     if (!canConfirm) return;
     setSubmitting(true);
     setTxError(null);
-    localStorage.setItem("topup_destination", destination);
     try {
       const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
       const inner = buildErc20TransferTx(eureAddress, destination as `0x${string}`, amountWei);
@@ -876,25 +872,21 @@ function TopUpSheet({
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
         {/* Destination */}
         <div>
-          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Destination address</div>
-          <input
-            type="text"
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            placeholder="0x…"
-            style={{
-              width: "100%",
-              fontSize: 12,
-              fontFamily: "monospace",
-              border: "1px solid var(--line)",
-              borderRadius: 10,
-              padding: "10px 14px",
-              outline: "none",
-              background: "transparent",
-              color: "var(--ink)",
-              boxSizing: "border-box",
-            }}
-          />
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Card safe address</div>
+          <div style={{
+            width: "100%",
+            fontSize: 12,
+            fontFamily: "monospace",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            background: "var(--surface-muted, #f8f8f8)",
+            color: "var(--ink)",
+            boxSizing: "border-box",
+            wordBreak: "break-all",
+          }}>
+            {destination || "—"}
+          </div>
         </div>
 
         {/* Amount */}
@@ -1038,23 +1030,6 @@ function DashboardPage() {
     loadPosition();
   }, [loadPosition]);
 
-  // Fetch EURe wallet balance of the active safe whenever position or address changes
-  useEffect(() => {
-    if (!activeAddress || !eureAsset) { setEureWalletBalance(null); return; }
-    fetchErc20Balance(eureAsset.address as `0x${string}`, activeAddress as `0x${string}`)
-      .then(setEureWalletBalance)
-      .catch(() => setEureWalletBalance(null));
-  }, [activeAddress, eureAsset]);
-
-  const allSafes = useMemo(
-    () => (address ? [address, ...ownedSafes] : []),
-    [address, ownedSafes],
-  );
-  // Borrow/repay are available when:
-  // - viewing own address, OR
-  // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
-  const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
-
   // EURe asset — derived from position, memoized to avoid repeated .find() scans
   const eureAsset = useMemo(() => {
     if (!position) return null;
@@ -1065,6 +1040,23 @@ function DashboardPage() {
       null
     );
   }, [position]);
+
+  const allSafes = useMemo(
+    () => (address ? [address, ...ownedSafes] : []),
+    [address, ownedSafes],
+  );
+  // Borrow/repay are available when:
+  // - viewing own address, OR
+  // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
+  const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
+
+  // Fetch EURe wallet balance of the active safe whenever position or address changes
+  useEffect(() => {
+    if (!activeAddress || !eureAsset) { setEureWalletBalance(null); return; }
+    fetchErc20Balance(eureAsset.address as `0x${string}`, activeAddress as `0x${string}`)
+      .then(setEureWalletBalance)
+      .catch(() => setEureWalletBalance(null));
+  }, [activeAddress, eureAsset]);
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -1088,9 +1080,9 @@ function DashboardPage() {
   if (loading && !position) {
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12 }}>
-        {[120, 200, 160].map((h, i) => (
+        {[120, 200, 160].map((h) => (
           <div
-            key={i}
+            key={h}
             style={{
               height: h,
               background: "#ffffff",
@@ -1298,7 +1290,7 @@ function DashboardPage() {
               signerAddress={address as `0x${string}`}
               eureBalance={eureWalletBalance}
               eureAddress={eureAsset.address as `0x${string}`}
-              defaultDestination={address}
+              defaultDestination={ownedSafes.find(s => s !== selectedAddress) ?? ""}
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
             />
           )}
