@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
@@ -27,9 +27,6 @@ import {
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    wallet: typeof search.wallet === "string" ? search.wallet : undefined,
-  }),
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -972,13 +969,11 @@ function TopUpSheet({
 
 function DashboardPage() {
   const { address, isConnected } = useWallet();
-  const { wallet: walletParam } = useSearch({ from: "/" });
-  const navigate = useNavigate({ from: "/" });
   const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
   const [safesLoading, setSafesLoading] = useState(false);
   const [safesLoaded, setSafesLoaded] = useState(false);
   const safesLoadingRef = useRef(false);
-  const [selectedAddress, setSelectedAddress] = useState<string | null>(walletParam ?? null);
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -1222,16 +1217,7 @@ function DashboardPage() {
                 options={allSafes.length ? allSafes : [activeAddress ?? ""]}
                 value={activeAddress ?? ""}
                 connectedAddress={address ?? ""}
-                onChange={(addr) => {
-                  setSelectedAddress(addr);
-                  navigate({
-                    search: (prev) => ({
-                      ...prev,
-                      wallet: addr && addr !== address ? addr : undefined,
-                    }),
-                    replace: true,
-                  });
-                }}
+                onChange={setSelectedAddress}
                 onOpen={loadSiblingsSafes}
                 loading={safesLoading}
               />
