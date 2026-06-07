@@ -823,7 +823,7 @@ function TopUpSheet({
   defaultDestination?: string;
   onSuccess: () => void;
 }) {
-  const [destination] = useState(defaultDestination ?? "");
+  const destination = defaultDestination ?? "";
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [submitting, setSubmitting] = useState(false);
