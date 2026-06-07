@@ -809,21 +809,22 @@ function TopUpSheet({
   signerAddress,
   eureBalance,
   eureAddress,
-  onClose,
+  defaultDestination,
   onSuccess,
 }: {
   safeAddress: `0x${string}`;
   signerAddress: `0x${string}`;
   eureBalance: bigint;
   eureAddress: `0x${string}`;
-  onClose: () => void;
+  defaultDestination?: string;
   onSuccess: () => void;
 }) {
-  const [destination, setDestination] = useState("");
+  const [destination, setDestination] = useState(defaultDestination ?? "");
   useEffect(() => {
     const stored = localStorage.getItem("topup_destination");
     if (stored) setDestination(stored);
-  }, []);
+    else if (defaultDestination) setDestination(defaultDestination);
+  }, [defaultDestination]);
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -963,6 +964,7 @@ function DashboardPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
+  const [topupOpen, setTopupOpen] = useState(false);
   const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
 
   const activeAddress = selectedAddress ?? address;
@@ -1232,7 +1234,7 @@ function DashboardPage() {
       </div>
 
       {/* ── Wallet EURe balance ───────────────────────────────────────────── */}
-      {eureWalletBalance !== null && eureWalletBalance > 0n && (
+      {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
         <div>
           <SectionLabel>Wallet Balance</SectionLabel>
           <Card>
@@ -1244,6 +1246,7 @@ function DashboardPage() {
                   {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
                 </div>
               </div>
+              <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
             </div>
           </Card>
         </div>
@@ -1267,6 +1270,29 @@ function DashboardPage() {
                 : undefined
             }
           />
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Top Up sheet ──────────────────────────────────────────────────── */}
+      <Sheet
+        open={topupOpen}
+        onOpenChange={(open: boolean) => { if (!open) setTopupOpen(false); }}
+      >
+        <SheetContent side="bottom" showCloseButton>
+          {isOwnerOfSelected && selectedAddress && address && eureWalletBalance !== null && position && (
+            <TopUpSheet
+              safeAddress={selectedAddress as `0x${string}`}
+              signerAddress={address as `0x${string}`}
+              eureBalance={eureWalletBalance}
+              eureAddress={(
+                position.borrows.find((b) => b.symbol === 'EURe') ??
+                position.borrowable.find((b) => b.symbol === 'EURe') ??
+                position.supplies.find((b) => b.symbol === 'EURe')
+              )?.address as `0x${string}`}
+              defaultDestination={address}
+              onSuccess={() => { setTopupOpen(false); loadPosition(); }}
+            />
+          )}
         </SheetContent>
       </Sheet>
 
