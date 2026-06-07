@@ -825,18 +825,18 @@ function ActionSheet({
             {txError}
           </div>
         )}
-        {!isRepay && cardSafeAddress ? (
+        {!isRepay ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
               {submitting ? <Spinner /> : "Send to Circles wallet →"}
             </PrimaryButton>
-            <PrimaryButton onClick={handleConfirmToCard} disabled={!canConfirm || isMax} style={{ background: "var(--brand)" }}>
+            <PrimaryButton onClick={handleConfirmToCard} disabled={!canConfirm || isMax || !cardSafeAddress}>
               {submitting ? <Spinner /> : "Top up card →"}
             </PrimaryButton>
           </div>
         ) : (
           <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
-            {submitting ? <Spinner /> : isRepay ? "Repay →" : "Send to Circles wallet →"}
+            {submitting ? <Spinner /> : "Repay →"}
           </PrimaryButton>
         )}
         {!submitting && canConfirm && (
