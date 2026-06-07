@@ -1048,7 +1048,7 @@ function DashboardPage() {
             sheet={sheet}
             onClose={() => setSheet(null)}
             onSuccess={loadPosition}
-            walletAddress={address ?? ""}
+            walletAddress={activeAddress ?? ""}
             position={position}
           />
         </SheetContent>
