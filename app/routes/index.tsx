@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
+import { shortenAddress } from "@/lib/utils";
 import {
   fetchAavePosition,
   type AavePosition,
@@ -241,6 +242,144 @@ function OutlineButton({
   );
 }
 
+// ─── Address picker (iframe-safe custom dropdown) ────────────────────────────
+
+function AddressPicker({
+  options,
+  value,
+  connectedAddress,
+  onChange,
+}: {
+  options: string[];
+  value: string;
+  connectedAddress: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  const canSwitch = options.length > 1;
+  const label = (addr: string) =>
+    addr === connectedAddress ? `${addr} (connected)` : addr;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* address + optional switcher */}
+        <button
+          onClick={() => canSwitch && setOpen((v) => !v)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 10,
+            fontFamily: "monospace",
+            color: value !== connectedAddress ? "var(--accent-brand)" : "var(--muted-text)",
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: canSwitch ? "pointer" : "default",
+            outline: "none",
+            wordBreak: "break-all",
+            textAlign: "left",
+          }}
+        >
+          <span>{value}</span>
+          {canSwitch && (
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
+              <path d="M1 1l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+        </button>
+        {/* copy button */}
+        <button
+          onClick={handleCopy}
+          title="Copy address"
+          style={{
+            flexShrink: 0,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: 2,
+            color: copied ? "var(--accent-brand)" : "var(--muted-text)",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          {copied ? (
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <path d="M2 7l3 3 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+              <rect x="4.5" y="1" width="7.5" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+              <path d="M1 4.5h2M1 4.5V11.5a1 1 0 001 1h6.5V11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          )}
+        </button>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            right: 0,
+            marginTop: 6,
+            background: "#fff",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
+            zIndex: 100,
+            overflow: "hidden",
+            minWidth: 300,
+          }}
+        >
+          {options.map((addr) => (
+            <button
+              key={addr}
+              onClick={() => { onChange(addr); setOpen(false); }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 14px",
+                fontSize: 10,
+                fontFamily: "monospace",
+                background: addr === value ? "var(--accent-soft)" : "transparent",
+                color: addr === value ? "var(--accent-brand)" : "var(--ink)",
+                border: "none",
+                borderBottom: "1px solid var(--line-soft)",
+                cursor: "pointer",
+                wordBreak: "break-all",
+              }}
+            >
+              {label(addr)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Borrow row (list item) ──────────────────────────────────────────────────
 
 function BorrowRow({
@@ -301,7 +440,7 @@ function BorrowTile({
             {asset.symbol}
           </div>
           <div style={{ fontSize: 12, color: "var(--muted-text)" }}>
-            up to €{fmtEur(asset.maxAmountEur)}
+            up to {fmtToken(asset.maxAmount, asset.decimals)} EURe
           </div>
         </div>
       </div>
@@ -500,28 +639,91 @@ function ActionSheet({
 
 function DashboardPage() {
   const { address, isConnected } = useWallet();
+  const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
 
-  const loadPosition = useCallback(async () => {
+  const activeAddress = selectedAddress ?? address;
+
+  useEffect(() => {
     if (!address) return;
+    setSelectedAddress(null);
+
+    const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
+
+    async function loadRelatedSafes() {
+      const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+      // Get connected Safe's owners
+      const safeInfo = await fetch(`${BASE}/safes/${address}/`)
+        .then((r) => r.json()).catch(() => null);
+      const owners: string[] = safeInfo?.owners ?? [];
+
+      const candidates = new Set<string>();
+
+      for (const owner of owners) {
+        await pause(150);
+
+        // Skip if owner is itself a Safe
+        const isSafe = await fetch(`${BASE}/safes/${owner}/`)
+          .then((r) => r.ok).catch(() => false);
+        if (isSafe) continue;
+
+        await pause(150);
+
+        // Get safes owned by this EOA
+        const res = await fetch(`${BASE}/owners/${owner}/safes/`)
+          .then((r) => r.json()).catch(() => ({ safes: [] }));
+        const safes: string[] = res.safes ?? [];
+
+        // Skip protocol/relayer addresses — a personal passkey owns at most a handful
+        if (safes.length > 10) continue;
+
+        for (const s of safes) {
+          if (s !== address) candidates.add(s);
+        }
+      }
+
+      // Keep only addresses registered in the Circles protocol
+      const circlesSafes: string[] = [];
+      for (const s of candidates) {
+        await pause(100);
+        const view = await fetch('https://rpc.aboutcircles.com/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'circles_getProfileView', params: [s] }),
+        }).then((r) => r.json()).catch(() => null);
+        if (view?.result?.avatarInfo) circlesSafes.push(s);
+      }
+
+      setOwnedSafes(circlesSafes);
+    }
+
+    loadRelatedSafes();
+  }, [address]);
+
+  const loadPosition = useCallback(async () => {
+    if (!activeAddress) return;
     setLoading(true);
     setFetchError(null);
     try {
-      const pos = await fetchAavePosition(address as `0x${string}`);
+      const pos = await fetchAavePosition(activeAddress as `0x${string}`);
       setPosition(pos);
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : "Failed to load position");
     } finally {
       setLoading(false);
     }
-  }, [address]);
+  }, [activeAddress]);
 
   useEffect(() => {
     loadPosition();
   }, [loadPosition]);
+
+  const allSafes = address ? [address, ...ownedSafes] : [];
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -597,7 +799,9 @@ function DashboardPage() {
       >
         {/* ── Hero card ─────────────────────────────────────────────────── */}
         <Card style={{ padding: "24px" }}>
-          <SectionLabel>Total Debt</SectionLabel>
+          <div style={{ fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted-text)", marginBottom: 12 }}>
+            Total Debt
+          </div>
           <div
             style={{
               fontSize: 36,
@@ -615,6 +819,16 @@ function DashboardPage() {
               €{fmtEur(position.availableBorrowsEur)} available to borrow
             </span>
           </div>
+          {activeAddress && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-soft)" }}>
+              <AddressPicker
+                options={allSafes.length ? allSafes : [activeAddress]}
+                value={activeAddress}
+                connectedAddress={address ?? ""}
+                onChange={setSelectedAddress}
+              />
+            </div>
+          )}
         </Card>
 
         {/* ── Your borrows ──────────────────────────────────────────────── */}
@@ -647,27 +861,27 @@ function DashboardPage() {
         {/* ── Available to borrow ───────────────────────────────────────── */}
         <div>
           <SectionLabel>Available to Borrow</SectionLabel>
-          {position.borrowable.length === 0 ? (
-            <div style={{ color: "var(--muted-text)", fontSize: 14 }}>
-              Nothing available
-            </div>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(2, 1fr)",
-                gap: 12,
-              }}
-            >
-              {position.borrowable.map((a) => (
-                <BorrowTile
-                  key={a.address}
-                  asset={a}
-                  onBorrow={() => setSheet({ type: "borrow", asset: a })}
-                />
-              ))}
-            </div>
-          )}
+          <Card>
+            {(() => {
+              const eure = position.borrowable.find((a) => a.symbol === "EURe");
+              if (!eure) return (
+                <div style={{ padding: "20px", color: "var(--muted-text)", fontSize: 14, textAlign: "center" }}>
+                  Nothing available
+                </div>
+              );
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+                  <TokenIcon symbol={eure.symbol} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{eure.symbol}</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-text)" }}>up to {fmtToken(eure.maxAmount, eure.decimals)} EURe</div>
+                  </div>
+                  <ApyBadge apy={eure.apy} />
+                  <OutlineButton onClick={() => setSheet({ type: "borrow", asset: eure })}>Borrow</OutlineButton>
+                </div>
+              );
+            })()}
+          </Card>
         </div>
       </div>
 
