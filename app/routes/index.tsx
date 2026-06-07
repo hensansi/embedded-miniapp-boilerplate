@@ -252,11 +252,15 @@ function AddressPicker({
   value,
   connectedAddress,
   onChange,
+  onOpen,
+  loading,
 }: {
   options: string[];
   value: string;
   connectedAddress: string;
   onChange: (v: string) => void;
+  onOpen?: () => void;
+  loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -287,7 +291,7 @@ function AddressPicker({
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {/* address + optional switcher */}
         <button
-          onClick={() => canSwitch && setOpen((v) => !v)}
+          onClick={() => { onOpen?.(); setOpen((v) => !v); }}
           style={{
             display: "flex",
             alignItems: "center",
@@ -355,6 +359,11 @@ function AddressPicker({
             minWidth: 300,
           }}
         >
+          {loading && (
+            <div style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted-text)" }}>
+              Loading safes…
+            </div>
+          )}
           {options.map((addr) => (
             <button
               key={addr}
@@ -731,8 +740,13 @@ function ActionSheet({
           </div>
         )}
         <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
-          {submitting ? <Spinner /> : "Confirm"}
+          {submitting ? <Spinner /> : "Send to Circles wallet →"}
         </PrimaryButton>
+        {!submitting && canConfirm && (
+          <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted-text)", marginTop: 8 }}>
+            Circles will ask you to approve the transaction
+          </div>
+        )}
       </div>
     </>
   );
@@ -743,6 +757,8 @@ function ActionSheet({
 function DashboardPage() {
   const { address, isConnected } = useWallet();
   const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
+  const [safesLoading, setSafesLoading] = useState(false);
+  const [safesLoaded, setSafesLoaded] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
@@ -751,16 +767,22 @@ function DashboardPage() {
 
   const activeAddress = selectedAddress ?? address;
 
+  // Reset on wallet change
   useEffect(() => {
-    if (!address) return;
     setSelectedAddress(null);
+    setOwnedSafes([]);
+    setSafesLoaded(false);
+  }, [address]);
+
+  // Lazy-load sibling safes — only when the user opens the address picker
+  const loadSiblingsSafes = useCallback(async () => {
+    if (!address || safesLoaded || safesLoading) return;
+    setSafesLoading(true);
 
     const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    async function loadRelatedSafes() {
-      const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-      // Get connected Safe's owners
+    try {
       const safeInfo = await fetch(`${BASE}/safes/${address}/`)
         .then((r) => r.json()).catch(() => null);
       const owners: string[] = safeInfo?.owners ?? [];
@@ -768,33 +790,28 @@ function DashboardPage() {
       const candidates = new Set<string>();
 
       for (const owner of owners) {
-        await pause(150);
-
-        // Skip if owner is itself a Safe
+        await pause(300);
         const isSafe = await fetch(`${BASE}/safes/${owner}/`)
           .then((r) => r.ok).catch(() => false);
         if (isSafe) continue;
 
-        await pause(150);
-
-        // Get safes owned by this EOA
+        await pause(300);
         const res = await fetch(`${BASE}/owners/${owner}/safes/`)
           .then((r) => r.json()).catch(() => ({ safes: [] }));
         const safes: string[] = res.safes ?? [];
 
-        // Skip protocol/relayer addresses — a personal passkey owns at most a handful
         if (safes.length > 10) continue;
-
         for (const s of safes) {
           if (s !== address) candidates.add(s);
         }
       }
 
       setOwnedSafes([...candidates]);
+    } finally {
+      setSafesLoading(false);
+      setSafesLoaded(true);
     }
-
-    loadRelatedSafes();
-  }, [address]);
+  }, [address, safesLoaded, safesLoading]);
 
   const loadPosition = useCallback(async () => {
     if (!activeAddress) return;
@@ -913,10 +930,12 @@ function DashboardPage() {
           {activeAddress && (
             <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line-soft)" }}>
               <AddressPicker
-                options={allSafes.length ? allSafes : [activeAddress]}
-                value={activeAddress}
+                options={allSafes.length ? allSafes : [activeAddress ?? ""]}
+                value={activeAddress ?? ""}
                 connectedAddress={address ?? ""}
                 onChange={setSelectedAddress}
+                onOpen={loadSiblingsSafes}
+                loading={safesLoading}
               />
             </div>
           )}
