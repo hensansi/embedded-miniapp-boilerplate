@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { parseUnits } from "viem";
+import { parseUnits, formatUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import {
   fetchAavePosition,
@@ -16,6 +16,7 @@ import {
   wrapInExecTransaction,
   MAX_REPAY_AMOUNT,
 } from "@/lib/aave-actions";
+import { buildQueueDelayTx, buildExecuteDelayTx } from "@/lib/gnosis-card-actions";
 
 import {
   Sheet,
@@ -392,6 +393,39 @@ function AddressPicker({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CardAddressCopy({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy() {
+    navigator.clipboard.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3 }}>
+      <span style={{ fontSize: 9, fontFamily: "monospace", color: "var(--muted-text)", wordBreak: "break-all" }}>
+        {address}
+      </span>
+      <button
+        onClick={handleCopy}
+        title="Copy card address"
+        style={{ flexShrink: 0, background: "transparent", border: "none", cursor: "pointer", padding: 2, color: copied ? "var(--accent-brand)" : "var(--muted-text)", display: "flex", alignItems: "center" }}
+      >
+        {copied ? (
+          <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
+            <path d="M2 7l3 3 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        ) : (
+          <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
+            <rect x="4.5" y="1" width="7.5" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+            <path d="M1 4.5h2M1 4.5V11.5a1 1 0 001 1h6.5V11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+          </svg>
+        )}
+      </button>
     </div>
   );
 }
@@ -1000,6 +1034,208 @@ function TopUpSheet({
   );
 }
 
+// ─── Withdraw sheet (card safe → source safe) ────────────────────────────────
+
+function WithdrawSheet({
+  cardSafeAddress,
+  signerAddress,
+  sourceAddress,
+  eureAddress,
+  cardBalance,
+  onSuccess,
+}: {
+  cardSafeAddress: `0x${string}`;
+  signerAddress: `0x${string}`;
+  sourceAddress: `0x${string}`;
+  eureAddress: `0x${string}`;
+  cardBalance: bigint;
+  onSuccess: () => void;
+}) {
+  const balanceHuman = Number(cardBalance) / 1e18;
+  const [amount, setAmount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+
+  const parsedAmount = parseFloat(amount) || 0;
+  const canConfirm = parsedAmount > 0 && !submitting;
+
+  function handleMax() {
+    setAmount((Math.floor(balanceHuman * 100) / 100).toFixed(2));
+  }
+
+  async function handleConfirm() {
+    if (!canConfirm) return;
+    setSubmitting(true);
+    setTxError(null);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const amountWei = parseUnits(amount, 18);
+      const transferTx = buildErc20TransferTx(eureAddress, sourceAddress, amountWei);
+      const tx = wrapInExecTransaction(transferTx, cardSafeAddress, signerAddress);
+      await sendTransactions([tx]);
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <SheetHeader style={{ padding: "20px 20px 0" }}>
+        <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>Withdraw from Card</SheetTitle>
+        <SheetDescription style={{ color: "var(--muted-text)", fontSize: 13 }}>
+          Transfer EURe from card back to source wallet
+        </SheetDescription>
+      </SheetHeader>
+
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+          <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card balance</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+            {fmtToken(balanceHuman, 18)} EURe
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Amount</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid var(--line)", borderRadius: 12, padding: "4px 4px 4px 16px" }}>
+            <input
+              type="number"
+              min="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+              style={{ flex: 1, fontSize: 28, fontWeight: 600, border: "none", outline: "none", background: "transparent", color: "var(--ink)", fontFamily: "inherit", minWidth: 0 }}
+            />
+            <button
+              onClick={handleMax}
+              style={{ background: "var(--accent-soft)", color: "var(--accent-brand)", border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
+            >MAX</button>
+          </div>
+          {parsedAmount > 0 && !Number.isInteger(parsedAmount * 100) && (
+            <button
+              onClick={() => setAmount((Math.floor(parsedAmount * 100) / 100).toFixed(2))}
+              style={{ marginTop: 6, background: "none", border: "none", color: "var(--accent-brand)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", padding: 0 }}
+            >
+              Trim to cents → {(Math.floor(parsedAmount * 100) / 100).toFixed(2)}
+            </button>
+          )}
+        </div>
+
+        {txError && (
+          <div style={{ background: "#fee2e2", color: "#7f1d1d", fontSize: 13, padding: "10px 14px", borderRadius: 10 }}>
+            {txError}
+          </div>
+        )}
+
+        <OutlineButton
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
+        >
+          {submitting ? "Sending…" : "Confirm Withdraw"}
+        </OutlineButton>
+      </div>
+    </>
+  );
+}
+
+// ─── Sweep dust button (2-step via Zodiac Delay module) ─────────────────────
+// Card safe has no owners — only the Delay module can execute txs from it.
+// Step 1: queue the transfer via execTransactionFromModule (connected wallet is enabled module).
+// Step 2: after 180s cooldown, execute via executeNextTx with the exact same params.
+
+const SWEEP_COOLDOWN_S = 180;
+
+type SweepPending = { innerTo: string; innerData: string; queuedAt: number };
+
+function SweepViaDelayButton({
+  delayModuleAddress,
+  eureAddress,
+  sourceAddress,
+  dustAmount,
+  onSuccess,
+}: {
+  delayModuleAddress: `0x${string}`;
+  eureAddress: `0x${string}`;
+  sourceAddress: `0x${string}`;
+  dustAmount: bigint;
+  onSuccess: () => void;
+}) {
+  const lsKey = `sweep_pending_${delayModuleAddress}`;
+
+  const [pending, setPending] = useState<SweepPending | null>(() => {
+    try { return JSON.parse(localStorage.getItem(lsKey) ?? "null"); }
+    catch { return null; }
+  });
+  const [now, setNow] = useState(() => Date.now());
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const secondsLeft = pending
+    ? Math.max(0, SWEEP_COOLDOWN_S - Math.floor((now - pending.queuedAt * 1000) / 1000))
+    : null;
+  const canExecute = pending !== null && secondsLeft === 0;
+
+  async function handleQueue() {
+    setSubmitting(true);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const innerData = buildErc20TransferTx(eureAddress, sourceAddress, dustAmount).data;
+      await sendTransactions([buildQueueDelayTx(delayModuleAddress, eureAddress, innerData)]);
+      const entry: SweepPending = { innerTo: eureAddress, innerData, queuedAt: Math.floor(Date.now() / 1000) };
+      localStorage.setItem(lsKey, JSON.stringify(entry));
+      setPending(entry);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleExecute() {
+    if (!pending) return;
+    setSubmitting(true);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      await sendTransactions([buildExecuteDelayTx(delayModuleAddress, pending.innerTo as `0x${string}`, pending.innerData as `0x${string}`)]);
+      localStorage.removeItem(lsKey);
+      setPending(null);
+      onSuccess();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (pending && secondsLeft! > 0) {
+    const m = Math.floor(secondsLeft! / 60);
+    const s = secondsLeft! % 60;
+    return (
+      <OutlineButton disabled style={{ fontSize: 12 }}>
+        Execute in {m}:{s.toString().padStart(2, "0")}
+      </OutlineButton>
+    );
+  }
+
+  if (canExecute) {
+    return (
+      <OutlineButton onClick={handleExecute} disabled={submitting} style={{ fontSize: 12 }}>
+        {submitting ? "…" : "Execute Sweep →"}
+      </OutlineButton>
+    );
+  }
+
+  return (
+    <OutlineButton onClick={handleQueue} disabled={submitting} style={{ fontSize: 12 }}>
+      {submitting ? "…" : `Sweep ${formatUnits(dustAmount, 18)} →`}
+    </OutlineButton>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 function DashboardPage() {
@@ -1015,8 +1251,10 @@ function DashboardPage() {
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
   const [topupOpen, setTopupOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
   const [cardSafeAddress, setCardSafeAddress] = useState<string | null>(null);
+  const [delayModuleAddress, setDelayModuleAddress] = useState<string | null>(null);
   const [cardSafeBalance, setCardSafeBalance] = useState<bigint | null>(null);
 
   const activeAddress = selectedAddress ?? address;
@@ -1029,6 +1267,7 @@ function DashboardPage() {
     setIsOwnerOfSelected(false);
     setEureWalletBalance(null);
     setCardSafeAddress(null);
+    setDelayModuleAddress(null);
     setCardSafeBalance(null);
   }, [address]);
 
@@ -1127,7 +1366,7 @@ function DashboardPage() {
       body: JSON.stringify({
         query: `query payOwners($address: String) {
           Metri_Pay_DelayModuleOwner(where: {ownerAddress: {_eq: $address}}) {
-            delayModule { safeAddress }
+            delayModule { id safeAddress }
           }
         }`,
         variables: { address },
@@ -1135,10 +1374,12 @@ function DashboardPage() {
     })
       .then((r) => r.json())
       .then((data) => {
-        const entries: { delayModule: { safeAddress: string } }[] =
+        const entries: { delayModule: { id: string; safeAddress: string } }[] =
           data?.data?.Metri_Pay_DelayModuleOwner ?? [];
         if (entries.length > 0) {
-          setCardSafeAddress(entries[entries.length - 1].delayModule.safeAddress);
+          const last = entries[entries.length - 1].delayModule;
+          setCardSafeAddress(last.safeAddress);
+          setDelayModuleAddress(last.id);
         }
       })
       .catch(() => {});
@@ -1267,18 +1508,34 @@ function DashboardPage() {
             <Card>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
                 <TokenIcon symbol="EURe" />
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
                   <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
                     {cardSafeBalance !== null
-                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
+                      ? `${formatUnits(cardSafeBalance, 18)} EURe on card`
                       : "loading…"}
                   </div>
+                  <CardAddressCopy address={cardSafeAddress} />
                 </div>
-                <OutlineButton
-                  onClick={() => setTopupOpen(true)}
-                  disabled={!eureWalletBalance || eureWalletBalance === 0n}
-                >Top Up</OutlineButton>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {cardSafeBalance !== null && cardSafeBalance % (10n ** 16n) > 0n && delayModuleAddress && (
+                    <SweepViaDelayButton
+                      delayModuleAddress={delayModuleAddress as `0x${string}`}
+                      eureAddress={eureAsset!.address as `0x${string}`}
+                      sourceAddress={selectedAddress as `0x${string}`}
+                      dustAmount={cardSafeBalance % (10n ** 16n)}
+                      onSuccess={() => { loadPosition(); }}
+                    />
+                  )}
+                  <OutlineButton
+                    onClick={() => setWithdrawOpen(true)}
+                    disabled={!cardSafeBalance || cardSafeBalance === 0n}
+                  >Withdraw</OutlineButton>
+                  <OutlineButton
+                    onClick={() => setTopupOpen(true)}
+                    disabled={!eureWalletBalance || eureWalletBalance === 0n}
+                  >Top Up</OutlineButton>
+                </div>
               </div>
             </Card>
           </div>
@@ -1392,6 +1649,25 @@ function DashboardPage() {
               eureAddress={eureAsset.address as `0x${string}`}
               defaultDestination={cardSafeAddress ?? ""}
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Withdraw sheet ────────────────────────────────────────────────── */}
+      <Sheet
+        open={withdrawOpen}
+        onOpenChange={(open: boolean) => { if (!open) setWithdrawOpen(false); }}
+      >
+        <SheetContent side="bottom" showCloseButton>
+          {cardSafeAddress && address && selectedAddress && eureAsset && cardSafeBalance !== null && (
+            <WithdrawSheet
+              cardSafeAddress={cardSafeAddress as `0x${string}`}
+              signerAddress={address as `0x${string}`}
+              sourceAddress={selectedAddress as `0x${string}`}
+              eureAddress={eureAsset.address as `0x${string}`}
+              cardBalance={cardSafeBalance}
+              onSuccess={() => { setWithdrawOpen(false); loadPosition(); }}
             />
           )}
         </SheetContent>
