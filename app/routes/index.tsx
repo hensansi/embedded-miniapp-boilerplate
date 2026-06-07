@@ -828,30 +828,8 @@ function TopUpSheet({
 }) {
   const [destination, setDestination] = useState(defaultDestination ?? "");
   useEffect(() => {
-    // Discover card safe via HyperIndex: signer EOA → DelayModuleOwner → card safe address
-    fetch("https://indexer.eu.hyperindex.xyz/00dfbaf/v1/graphql", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: `query payOwners($address: String) {
-          Metri_Pay_DelayModuleOwner(where: {ownerAddress: {_eq: $address}}) {
-            delayModule { safeAddress }
-          }
-        }`,
-        variables: { address: signerAddress },
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const entries: { delayModule: { safeAddress: string } }[] =
-          data?.data?.Metri_Pay_DelayModuleOwner ?? [];
-        if (entries.length > 0) {
-          // Last entry is the most recently associated card safe
-          setDestination(entries[entries.length - 1].delayModule.safeAddress);
-        }
-      })
-      .catch(() => {});
-  }, [signerAddress]);
+    setDestination(defaultDestination ?? "");
+  }, [defaultDestination]);
 
   const [cardBalance, setCardBalance] = useState<bigint | null>(null);
   useEffect(() => {
@@ -1008,6 +986,8 @@ function DashboardPage() {
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
   const [topupOpen, setTopupOpen] = useState(false);
   const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
+  const [cardSafeAddress, setCardSafeAddress] = useState<string | null>(null);
+  const [cardSafeBalance, setCardSafeBalance] = useState<bigint | null>(null);
 
   const activeAddress = selectedAddress ?? address;
 
@@ -1018,6 +998,8 @@ function DashboardPage() {
     setSafesLoaded(false);
     setIsOwnerOfSelected(false);
     setEureWalletBalance(null);
+    setCardSafeAddress(null);
+    setCardSafeBalance(null);
   }, [address]);
 
   // Declare callbacks before the effects that reference them (avoids TDZ in the minified bundle)
@@ -1105,6 +1087,40 @@ function DashboardPage() {
       .then(setEureWalletBalance)
       .catch(() => setEureWalletBalance(null));
   }, [activeAddress, eureAsset]);
+
+  // Discover card safe via HyperIndex: signer EOA → DelayModuleOwner → card safe
+  useEffect(() => {
+    if (!address) { setCardSafeAddress(null); return; }
+    fetch("https://indexer.eu.hyperindex.xyz/00dfbaf/v1/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query payOwners($address: String) {
+          Metri_Pay_DelayModuleOwner(where: {ownerAddress: {_eq: $address}}) {
+            delayModule { safeAddress }
+          }
+        }`,
+        variables: { address },
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const entries: { delayModule: { safeAddress: string } }[] =
+          data?.data?.Metri_Pay_DelayModuleOwner ?? [];
+        if (entries.length > 0) {
+          setCardSafeAddress(entries[entries.length - 1].delayModule.safeAddress);
+        }
+      })
+      .catch(() => {});
+  }, [address]);
+
+  // Fetch card safe EURe balance
+  useEffect(() => {
+    if (!cardSafeAddress || !eureAsset) { setCardSafeBalance(null); return; }
+    fetchErc20Balance(eureAsset.address as `0x${string}`, cardSafeAddress as `0x${string}`)
+      .then(setCardSafeBalance)
+      .catch(() => setCardSafeBalance(null));
+  }, [cardSafeAddress, eureAsset]);
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -1223,17 +1239,21 @@ function DashboardPage() {
           )}
         </Card>
 
-        {/* ── Wallet EURe balance ───────────────────────────────────────── */}
+        {/* ── Card wallet ───────────────────────────────────────────────── */}
         {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
           <div>
-            <SectionLabel>Wallet Balance</SectionLabel>
+            <SectionLabel>Card Wallet</SectionLabel>
             <Card>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
                 <TokenIcon symbol="EURe" />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
                   <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
-                    {fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe
+                    {cardSafeBalance !== null
+                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
+                      : cardSafeAddress
+                        ? "loading…"
+                        : `${fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe`}
                   </div>
                 </div>
                 <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
@@ -1347,7 +1367,7 @@ function DashboardPage() {
               signerAddress={address as `0x${string}`}
               eureBalance={eureWalletBalance}
               eureAddress={eureAsset.address as `0x${string}`}
-              defaultDestination=""
+              defaultDestination={cardSafeAddress ?? ""}
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
             />
           )}
