@@ -886,7 +886,7 @@ function TopUpSheet({
 
   const balanceHuman = Number(eureBalance) / 1e18;
   const parsedAmount = parseFloat(amount) || 0;
-  const amountWei = isMax ? eureBalance : parseUnits(amount || "0", 18);
+  const amountWei = parseUnits(amount || "0", 18);
   const canConfirm =
     destination.startsWith("0x") &&
     destination.length === 42 &&
