@@ -823,7 +823,18 @@ function TopUpSheet({
   defaultDestination?: string;
   onSuccess: () => void;
 }) {
-  const destination = defaultDestination ?? "";
+  const [destination, setDestination] = useState(defaultDestination ?? "");
+  useEffect(() => {
+    // Card safe is owned by the source safe (2-level lookup: EOA → source safe → card safe)
+    fetch(`https://api.safe.global/tx-service/gno/api/v1/owners/${safeAddress}/safes/`)
+      .then((r) => r.json())
+      .then((data) => {
+        const safes: string[] = data.safes ?? [];
+        if (safes.length > 0) setDestination(safes[0]);
+      })
+      .catch(() => {});
+  }, [safeAddress]);
+
   const [cardBalance, setCardBalance] = useState<bigint | null>(null);
   useEffect(() => {
     if (!destination.startsWith("0x") || destination.length !== 42) return;
@@ -1307,7 +1318,7 @@ function DashboardPage() {
               signerAddress={address as `0x${string}`}
               eureBalance={eureWalletBalance}
               eureAddress={eureAsset.address as `0x${string}`}
-              defaultDestination={ownedSafes.find(s => s !== selectedAddress) ?? ""}
+              defaultDestination=""
               onSuccess={() => { setTopupOpen(false); loadPosition(); }}
             />
           )}
