@@ -399,7 +399,7 @@ function BorrowRow({
   onRepay,
 }: {
   asset: AssetPosition;
-  onRepay: () => void;
+  onRepay?: () => void;
 }) {
   return (
     <div
@@ -429,7 +429,7 @@ function BorrowRow({
         </div>
       </div>
       <ApyBadge apy={asset.apy} />
-      <OutlineButton onClick={onRepay}>Repay</OutlineButton>
+      <OutlineButton onClick={onRepay} disabled={!onRepay}>Repay</OutlineButton>
     </div>
   );
 }
@@ -875,6 +875,10 @@ function DashboardPage() {
   }, [loadPosition]);
 
   const allSafes = address ? [address, ...ownedSafes] : [];
+  // Transactions are always sent from the connected wallet (msg.sender).
+  // Aave requires credit delegation to act on behalf of a different address,
+  // so borrow/repay only work when viewing the connected address itself.
+  const canTransact = !selectedAddress || selectedAddress === address;
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -1004,7 +1008,7 @@ function DashboardPage() {
                 <BorrowRow
                   key={b.address}
                   asset={b}
-                  onRepay={() => setSheet({ type: "repay", asset: b })}
+                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
                 />
               ))
             )}
@@ -1030,12 +1034,30 @@ function DashboardPage() {
                     <div style={{ fontSize: 11, color: "var(--muted-text)" }}>up to {fmtToken(eure.maxAmount, eure.decimals)} EURe</div>
                   </div>
                   <ApyBadge apy={eure.apy} />
-                  <OutlineButton onClick={() => setSheet({ type: "borrow", asset: eure })}>Borrow</OutlineButton>
+                  <OutlineButton
+                    onClick={canTransact ? () => setSheet({ type: "borrow", asset: eure }) : undefined}
+                    disabled={!canTransact}
+                  >Borrow</OutlineButton>
                 </div>
               );
             })()}
           </Card>
         </div>
+
+        {/* ── Read-only notice ──────────────────────────────────────────── */}
+        {!canTransact && (
+          <div style={{
+            background: "#fef9c3",
+            border: "1px solid #fde047",
+            borderRadius: 12,
+            padding: "12px 16px",
+            fontSize: 13,
+            color: "#713f12",
+            lineHeight: 1.5,
+          }}>
+            <strong>View only.</strong> Transactions must be sent from the address Circles connected you with (<span style={{ fontFamily: "monospace", fontSize: 11 }}>{address}</span>). Switch accounts in the Circles app to transact with this safe.
+          </div>
+        )}
       </div>
 
       {/* ── Action sheet ──────────────────────────────────────────────────── */}
