@@ -1,5 +1,4 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { AppShell } from "@/components/layout/AppShell";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 
 export const Route = createRootRoute({
@@ -9,9 +8,9 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <WalletProvider>
-      <AppShell>
+      <main style={{ minHeight: "100svh", padding: "16px" }}>
         <Outlet />
-      </AppShell>
+      </main>
     </WalletProvider>
   );
 }
