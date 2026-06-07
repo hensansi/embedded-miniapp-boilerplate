@@ -15,11 +15,16 @@ type Session = Awaited<ReturnType<WCWallet["approveSession"]>>;
 
 type AppState =
   | { phase: "idle" }
-  | { phase: "camera" }
   | { phase: "pairing" }
   | { phase: "proposal"; proposal: Web3WalletTypes.SessionProposal }
   | { phase: "session"; session: Session }
   | { phase: "request"; session: Session; event: Web3WalletTypes.SessionRequest };
+
+type LastAction = {
+  label: string;
+  txHash?: string;
+  timestamp: number;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -184,15 +189,13 @@ function Spinner({ light = false }: { light?: boolean }) {
 // ── Main component ────────────────────────────────────────────────
 
 function WalletConnectPage() {
-  const { address, isConnected, isMiniappHost } = useWallet();
+  const { address, isConnected } = useWallet();
   const [state, setState] = useState<AppState>({ phase: "idle" });
   const [pasteUri, setPasteUri] = useState("");
-  // Default to paste mode in iframe — camera requires allow="camera" on the iframe
-  const [showPaste, setShowPaste] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [lastAction, setLastAction] = useState<LastAction | null>(null);
   const wcRef = useRef<WCWallet | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
   const initializedRef = useRef(false);
 
   // Init WalletConnect once on first wallet connection
@@ -231,61 +234,6 @@ function WalletConnectPage() {
     })();
   }, [address]);
 
-  // Camera QR scanning
-  useEffect(() => {
-    if (state.phase !== "camera") return;
-    const videoEl = videoRef.current;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const { BrowserQRCodeReader } = await import("@zxing/browser");
-        if (!videoEl) return;
-        const reader = new BrowserQRCodeReader();
-        const result = await reader.decodeOnceFromVideoDevice(
-          undefined,
-          videoEl,
-        );
-        if (cancelled) return;
-        const uri = result.getText();
-        if (uri.startsWith("wc:")) {
-          setState({ phase: "pairing" });
-          try {
-            await wcRef.current!.core.pairing.pair({ uri });
-          } catch {
-            setError("Pairing failed. Try again.");
-            setState({ phase: "idle" });
-          }
-        } else {
-          setError("Not a WalletConnect QR code.");
-          setState({ phase: "idle" });
-        }
-      } catch (err: unknown) {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : "";
-        const isDenied =
-          msg.includes("NotAllowed") ||
-          msg.toLowerCase().includes("permission denied") ||
-          msg.toLowerCase().includes("permission");
-        setError(
-          isDenied
-            ? "Camera access denied. Paste a WC URI instead."
-            : "Camera error. Paste a WC URI instead.",
-        );
-        setShowPaste(true);
-        setState({ phase: "idle" });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (videoEl?.srcObject) {
-        (videoEl.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-        videoEl.srcObject = null;
-      }
-    };
-  }, [state.phase]);
-
   // ── Handlers ──────────────────────────────────────────────────────
 
   function handleConnectUri(uri: string) {
@@ -296,9 +244,9 @@ function WalletConnectPage() {
     }
     setError(null);
     setPasteUri("");
-    setShowPaste(false);
     setState({ phase: "pairing" });
-    wcRef.current!.core.pairing.pair({ uri: trimmed }).catch(() => {
+    wcRef.current!.core.pairing.pair({ uri: trimmed }).catch((err) => {
+      console.error("[wc] pairing failed:", err);
       setError("Pairing failed. Try again.");
       setState({ phase: "idle" });
     });
@@ -327,7 +275,8 @@ function WalletConnectPage() {
         namespaces,
       });
       setState({ phase: "session", session });
-    } catch {
+    } catch (err) {
+      console.error("[wc] approve session failed:", err);
       setError("Failed to approve session.");
     } finally {
       setApproving(false);
@@ -351,6 +300,7 @@ function WalletConnectPage() {
     try {
       const method = event.params.request.method;
       let result: string;
+      let action: LastAction;
 
       if (method === "eth_sendTransaction") {
         const tx = event.params.request.params[0] as {
@@ -363,12 +313,14 @@ function WalletConnectPage() {
           { to: tx.to, data: tx.data ?? "0x", value: tx.value ?? "0x0" },
         ]);
         result = txHash;
+        action = { label: "Transaction sent", txHash, timestamp: Date.now() };
       } else if (method === "personal_sign") {
         const hexMsg = event.params.request.params[0] as string;
         const message = hexMsg.startsWith("0x") ? hexToUtf8(hexMsg) : hexMsg;
         const { signMessage } = await import("@aboutcircles/miniapp-sdk");
         const { signature } = await signMessage(message, "erc1271");
         result = signature;
+        action = { label: "Message signed", timestamp: Date.now() };
       } else if (
         method === "eth_signTypedData" ||
         method === "eth_signTypedData_v4"
@@ -377,6 +329,7 @@ function WalletConnectPage() {
         const { signMessage } = await import("@aboutcircles/miniapp-sdk");
         const { signature } = await signMessage(typedDataJson, "raw");
         result = signature;
+        action = { label: "Typed data signed", timestamp: Date.now() };
       } else {
         throw new Error(`Unsupported method: ${method}`);
       }
@@ -385,8 +338,10 @@ function WalletConnectPage() {
         topic: event.topic,
         response: { id: event.id, jsonrpc: "2.0", result },
       });
+      setLastAction(action!);
       setState({ phase: "session", session });
     } catch (err) {
+      console.error("[wc] request failed:", err);
       setError(err instanceof Error ? err.message : "Request failed.");
     } finally {
       setApproving(false);
@@ -413,6 +368,7 @@ function WalletConnectPage() {
       topic: state.session.topic,
       reason: { code: 6000, message: "User disconnected" },
     });
+    setLastAction(null);
     setState({ phase: "idle" });
   }
 
@@ -444,77 +400,27 @@ function WalletConnectPage() {
         <div style={card}>
           <span style={sectionLabel}>Connect a dApp</span>
           {error && <p style={errorText}>{error}</p>}
-          {!isMiniappHost && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <input
+              style={inputStyle}
+              type="text"
+              placeholder="wc:…"
+              value={pasteUri}
+              onChange={(e) => setPasteUri(e.target.value)}
+              onKeyDown={(e) =>
+                e.key === "Enter" && pasteUri.trim() && handleConnectUri(pasteUri)
+              }
+              autoFocus
+            />
             <button
-              style={primaryBtn()}
-              onClick={async () => {
-                setError(null);
-                try {
-                  await navigator.mediaDevices.getUserMedia({ video: true });
-                  setState({ phase: "camera" });
-                } catch {
-                  setError("Camera not available. Paste a WC URI instead.");
-                  setShowPaste(true);
-                }
-              }}
+              style={primaryBtn(!pasteUri.trim())}
+              disabled={!pasteUri.trim()}
+              onClick={() => handleConnectUri(pasteUri)}
             >
-              Scan QR code
+              Connect
             </button>
-          )}
-          {!showPaste ? (
-            <button style={outlineBtn()} onClick={() => setShowPaste(true)}>
-              Paste URI
-            </button>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <input
-                style={inputStyle}
-                type="text"
-                placeholder="wc:…"
-                value={pasteUri}
-                onChange={(e) => setPasteUri(e.target.value)}
-                onKeyDown={(e) =>
-                  e.key === "Enter" && handleConnectUri(pasteUri)
-                }
-                autoFocus
-              />
-              <button
-                style={primaryBtn(!pasteUri.trim())}
-                disabled={!pasteUri.trim()}
-                onClick={() => handleConnectUri(pasteUri)}
-              >
-                Connect
-              </button>
-            </div>
-          )}
+          </div>
         </div>
-      </div>
-    );
-  }
-
-  // ── Camera ────────────────────────────────────────────────────────
-
-  if (state.phase === "camera") {
-    return (
-      <div style={container}>
-        <video
-          ref={videoRef}
-          style={{
-            width: "100%",
-            aspectRatio: "1",
-            borderRadius: "var(--radius-card)",
-            objectFit: "cover",
-            background: "#000",
-          }}
-          muted
-          playsInline
-        />
-        <button
-          style={outlineBtn()}
-          onClick={() => setState({ phase: "idle" })}
-        >
-          Cancel
-        </button>
       </div>
     );
   }
@@ -647,15 +553,50 @@ function WalletConnectPage() {
             </div>
           </div>
 
-          <p
-            style={{
-              ...mutedText,
-              textAlign: "center",
-              animation: "pulse 2s ease-in-out infinite",
-            }}
-          >
-            Waiting for request…
-          </p>
+          {lastAction ? (
+            <div
+              style={{
+                background: "var(--accent-soft)",
+                borderRadius: "var(--radius-sm-c)",
+                padding: "10px 12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+              }}
+            >
+              <span style={{ ...sectionLabel, color: "var(--c-accent)" }}>
+                Last action
+              </span>
+              <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500 }}>
+                {lastAction.label}
+              </span>
+              {lastAction.txHash && (
+                <a
+                  href={`https://gnosisscan.io/tx/${lastAction.txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                    color: "var(--c-accent)",
+                    textDecoration: "underline",
+                  }}
+                >
+                  {truncateAddr(lastAction.txHash)} ↗
+                </a>
+              )}
+            </div>
+          ) : (
+            <p
+              style={{
+                ...mutedText,
+                textAlign: "center",
+                animation: "pulse 2s ease-in-out infinite",
+              }}
+            >
+              Waiting for request…
+            </p>
+          )}
 
           <div style={{ textAlign: "right" }}>
             <button
