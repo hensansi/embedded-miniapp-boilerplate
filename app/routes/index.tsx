@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { parseUnits } from "viem";
+import { parseUnits, formatUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import {
   fetchAavePosition,
@@ -1109,6 +1109,45 @@ function WithdrawSheet({
   );
 }
 
+// ─── Sweep dust button ───────────────────────────────────────────────────────
+
+function SweepDustButton({
+  cardSafeAddress,
+  signerAddress,
+  sourceAddress,
+  eureAddress,
+  dustAmount,
+  onSuccess,
+}: {
+  cardSafeAddress: `0x${string}`;
+  signerAddress: `0x${string}`;
+  sourceAddress: `0x${string}`;
+  eureAddress: `0x${string}`;
+  dustAmount: bigint;
+  onSuccess: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSweep() {
+    setSubmitting(true);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const transferTx = buildErc20TransferTx(eureAddress, sourceAddress, dustAmount);
+      const tx = wrapInExecTransaction(transferTx, cardSafeAddress, signerAddress);
+      await sendTransactions([tx]);
+      onSuccess();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <OutlineButton onClick={handleSweep} disabled={submitting} style={{ fontSize: 12 }}>
+      {submitting ? "…" : `Sweep ${formatUnits(dustAmount, 18)} →`}
+    </OutlineButton>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 function DashboardPage() {
@@ -1381,11 +1420,21 @@ function DashboardPage() {
                   <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
                   <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
                     {cardSafeBalance !== null
-                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
+                      ? `${formatUnits(cardSafeBalance, 18)} EURe on card`
                       : "loading…"}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {cardSafeBalance !== null && cardSafeBalance % (10n ** 18n) > 0n && (
+                    <SweepDustButton
+                      cardSafeAddress={cardSafeAddress as `0x${string}`}
+                      signerAddress={address as `0x${string}`}
+                      sourceAddress={selectedAddress as `0x${string}`}
+                      eureAddress={eureAsset!.address as `0x${string}`}
+                      dustAmount={cardSafeBalance % (10n ** 18n)}
+                      onSuccess={() => { loadPosition(); }}
+                    />
+                  )}
                   <OutlineButton
                     onClick={() => setWithdrawOpen(true)}
                     disabled={!cardSafeBalance || cardSafeBalance === 0n}
