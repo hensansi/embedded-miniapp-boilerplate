@@ -131,7 +131,6 @@ export interface AssetPosition {
   amount: number;
   amountEur: number;
   apy: number;
-  isStable: boolean;
 }
 
 export interface BorrowableAsset {
@@ -254,7 +253,6 @@ export async function fetchAavePosition(
         amount,
         amountEur: toEur(amount, BigInt(reserve.priceInMarketReferenceCurrency)),
         apy: (Number(reserve.liquidityRate) / Number(RAY)) * 100,
-        isStable: false,
       });
     }
 
@@ -268,7 +266,6 @@ export async function fetchAavePosition(
         amount,
         amountEur: toEur(amount, BigInt(reserve.priceInMarketReferenceCurrency)),
         apy: (Number(reserve.variableBorrowRate) / Number(RAY)) * 100,
-        isStable: false,
       });
     }
   }
