@@ -184,9 +184,10 @@ function Spinner({ light = false }: { light?: boolean }) {
 // ── Main component ────────────────────────────────────────────────
 
 function WalletConnectPage() {
-  const { address, isConnected } = useWallet();
+  const { address, isConnected, isMiniappHost } = useWallet();
   const [state, setState] = useState<AppState>({ phase: "idle" });
   const [pasteUri, setPasteUri] = useState("");
+  // Default to paste mode in iframe — camera requires allow="camera" on the iframe
   const [showPaste, setShowPaste] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
@@ -443,15 +444,23 @@ function WalletConnectPage() {
         <div style={card}>
           <span style={sectionLabel}>Connect a dApp</span>
           {error && <p style={errorText}>{error}</p>}
-          <button
-            style={primaryBtn()}
-            onClick={() => {
-              setError(null);
-              setState({ phase: "camera" });
-            }}
-          >
-            Scan QR code
-          </button>
+          {!isMiniappHost && (
+            <button
+              style={primaryBtn()}
+              onClick={async () => {
+                setError(null);
+                try {
+                  await navigator.mediaDevices.getUserMedia({ video: true });
+                  setState({ phase: "camera" });
+                } catch {
+                  setError("Camera not available. Paste a WC URI instead.");
+                  setShowPaste(true);
+                }
+              }}
+            >
+              Scan QR code
+            </button>
+          )}
           {!showPaste ? (
             <button style={outlineBtn()} onClick={() => setShowPaste(true)}>
               Paste URI
