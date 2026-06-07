@@ -11,6 +11,7 @@ import {
 import {
   buildBorrowTx,
   buildRepayTx,
+  wrapInExecTransaction,
   MAX_REPAY_AMOUNT,
 } from "@/lib/aave-actions";
 import {
@@ -477,12 +478,14 @@ function ActionSheet({
   onSuccess,
   walletAddress,
   position,
+  execViaSafe,
 }: {
   sheet: SheetState | null;
   onClose: () => void;
   onSuccess: () => void;
   walletAddress: string;
   position: AavePosition | null;
+  execViaSafe?: { safe: `0x${string}`; signer: `0x${string}` };
 }) {
   const [input, setInput] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -555,6 +558,10 @@ function ActionSheet({
       } else {
         const amountWei = parseUnits(input, decimals);
         txs = buildBorrowTx((asset as BorrowableAsset).address, amountWei, addr);
+      }
+
+      if (execViaSafe) {
+        txs = txs.map((tx) => wrapInExecTransaction(tx, execViaSafe.safe, execViaSafe.signer));
       }
 
       await sendTransactions(txs);
@@ -807,6 +814,7 @@ function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
+  const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
 
   const activeAddress = selectedAddress ?? address;
 
@@ -815,41 +823,36 @@ function DashboardPage() {
     setSelectedAddress(null);
     setOwnedSafes([]);
     setSafesLoaded(false);
+    setIsOwnerOfSelected(false);
   }, [address]);
 
-  // Lazy-load sibling safes — only when the user opens the address picker
+  // Check if the Circles safe is an owner of the selected sibling safe
+  useEffect(() => {
+    if (!selectedAddress || selectedAddress === address) {
+      setIsOwnerOfSelected(false);
+      return;
+    }
+    fetch(`https://api.safe.global/tx-service/gno/api/v1/safes/${selectedAddress}/`)
+      .then((r) => r.json())
+      .then((info) => {
+        const owners: string[] = info?.owners ?? [];
+        setIsOwnerOfSelected(
+          owners.some((o) => o.toLowerCase() === address?.toLowerCase()),
+        );
+      })
+      .catch(() => setIsOwnerOfSelected(false));
+  }, [selectedAddress, address]);
+
+  // Lazy-load safes where the Circles safe is itself listed as an owner
   const loadSiblingsSafes = useCallback(async () => {
     if (!address || safesLoaded || safesLoading) return;
     setSafesLoading(true);
-
     const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
-    const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
     try {
-      const safeInfo = await fetch(`${BASE}/safes/${address}/`)
-        .then((r) => r.json()).catch(() => null);
-      const owners: string[] = safeInfo?.owners ?? [];
-
-      const candidates = new Set<string>();
-
-      for (const owner of owners) {
-        await pause(300);
-        const isSafe = await fetch(`${BASE}/safes/${owner}/`)
-          .then((r) => r.ok).catch(() => false);
-        if (isSafe) continue;
-
-        await pause(300);
-        const res = await fetch(`${BASE}/owners/${owner}/safes/`)
-          .then((r) => r.json()).catch(() => ({ safes: [] }));
-        const safes: string[] = res.safes ?? [];
-
-        if (safes.length > 10) continue;
-        for (const s of safes) {
-          if (s !== address) candidates.add(s);
-        }
-      }
-
-      setOwnedSafes([...candidates]);
+      const res = await fetch(`${BASE}/owners/${address}/safes/`)
+        .then((r) => r.json()).catch(() => ({ safes: [] }));
+      const safes: string[] = (res.safes ?? []).filter((s: string) => s !== address);
+      setOwnedSafes(safes);
     } finally {
       setSafesLoading(false);
       setSafesLoaded(true);
@@ -875,10 +878,10 @@ function DashboardPage() {
   }, [loadPosition]);
 
   const allSafes = address ? [address, ...ownedSafes] : [];
-  // Transactions are always sent from the connected wallet (msg.sender).
-  // Aave requires credit delegation to act on behalf of a different address,
-  // so borrow/repay only work when viewing the connected address itself.
-  const canTransact = !selectedAddress || selectedAddress === address;
+  // Borrow/repay are available when:
+  // - viewing own address, OR
+  // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
+  const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -1045,7 +1048,7 @@ function DashboardPage() {
         </div>
 
         {/* ── Read-only notice ──────────────────────────────────────────── */}
-        {!canTransact && (
+        {selectedAddress && selectedAddress !== address && !isOwnerOfSelected && (
           <div style={{
             background: "#fef9c3",
             border: "1px solid #fde047",
@@ -1055,7 +1058,7 @@ function DashboardPage() {
             color: "#713f12",
             lineHeight: 1.5,
           }}>
-            <strong>View only.</strong> Transactions must be sent from the address Circles connected you with (<span style={{ fontFamily: "monospace", fontSize: 11 }}>{address}</span>). Switch accounts in the Circles app to transact with this safe.
+            <strong>View only.</strong> Your connected wallet is not an owner of this safe. Switch accounts in the Circles app to transact.
           </div>
         )}
       </div>
@@ -1072,6 +1075,11 @@ function DashboardPage() {
             onSuccess={loadPosition}
             walletAddress={activeAddress ?? ""}
             position={position}
+            execViaSafe={
+              isOwnerOfSelected && selectedAddress && address
+                ? { safe: selectedAddress as `0x${string}`, signer: address as `0x${string}` }
+                : undefined
+            }
           />
         </SheetContent>
       </Sheet>
