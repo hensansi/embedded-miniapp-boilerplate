@@ -878,24 +878,17 @@ function TopUpSheet({
       </SheetHeader>
 
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Destination */}
-        <div>
-          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Card safe address</div>
-          <div style={{
-            width: "100%",
-            fontSize: 12,
-            fontFamily: "monospace",
-            border: "1px solid var(--line)",
-            borderRadius: 10,
-            padding: "10px 14px",
-            background: "var(--surface-muted, #f8f8f8)",
-            color: "var(--ink)",
-            boxSizing: "border-box",
-            wordBreak: "break-all",
-          }}>
-            {destination || "—"}
+        {/* Address debug */}
+        {[
+          { label: "Source safe (EURe from)", value: safeAddress },
+          { label: "Signer (owner)", value: signerAddress },
+          { label: "Destination (card safe)", value: destination || "—" },
+        ].map(({ label, value }) => (
+          <div key={label}>
+            <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 3 }}>{label}</div>
+            <div style={{ fontSize: 11, fontFamily: "monospace", wordBreak: "break-all", color: "var(--ink)" }}>{value}</div>
           </div>
-        </div>
+        ))}
 
         {/* Balances */}
         <div style={{ display: "flex", gap: 8 }}>
