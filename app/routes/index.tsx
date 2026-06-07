@@ -1226,7 +1226,7 @@ function DashboardPage() {
         </Card>
 
         {/* ── Card wallet ───────────────────────────────────────────────── */}
-        {isOwnerOfSelected && eureWalletBalance !== null && eureWalletBalance > 0n && (
+        {isOwnerOfSelected && cardSafeAddress && (
           <div>
             <SectionLabel>Card Wallet</SectionLabel>
             <Card>
@@ -1237,12 +1237,13 @@ function DashboardPage() {
                   <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
                     {cardSafeBalance !== null
                       ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
-                      : cardSafeAddress
-                        ? "loading…"
-                        : `${fmtToken(Number(eureWalletBalance) / 1e18, 18)} EURe in this safe`}
+                      : "loading…"}
                   </div>
                 </div>
-                <OutlineButton onClick={() => setTopupOpen(true)}>Top Up</OutlineButton>
+                <OutlineButton
+                  onClick={() => setTopupOpen(true)}
+                  disabled={!eureWalletBalance || eureWalletBalance === 0n}
+                >Top Up</OutlineButton>
               </div>
             </Card>
           </div>
