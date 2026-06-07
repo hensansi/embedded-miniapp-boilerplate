@@ -482,6 +482,7 @@ function ActionSheet({
   walletAddress,
   position,
   execViaSafe,
+  cardSafeAddress,
 }: {
   sheet: SheetState | null;
   onClose: () => void;
@@ -489,6 +490,7 @@ function ActionSheet({
   walletAddress: string;
   position: AavePosition | null;
   execViaSafe?: { safe: `0x${string}`; signer: `0x${string}` };
+  cardSafeAddress?: string | null;
 }) {
   const [input, setInput] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -580,6 +582,41 @@ function ActionSheet({
 
       if (execViaSafe) {
         txs = txs.map((tx) => wrapInExecTransaction(tx, execViaSafe.safe, execViaSafe.signer));
+      }
+
+      await sendTransactions(txs);
+      onClose();
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleConfirmToCard() {
+    if ((!input && !isMax) || !cardSafeAddress || isRepay) return;
+    setSubmitting(true);
+    setTxError(null);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const addr = walletAddress as `0x${string}`;
+      const amountWei = parseUnits(input, decimals);
+      const borrowTx = buildBorrowTx((asset as BorrowableAsset).address, amountWei, addr)[0];
+      const transferTx = buildErc20TransferTx(
+        (asset as BorrowableAsset).address,
+        cardSafeAddress as `0x${string}`,
+        amountWei,
+      );
+
+      let txs: { to: `0x${string}`; data: `0x${string}` }[];
+      if (execViaSafe) {
+        txs = [
+          wrapInExecTransaction(borrowTx, execViaSafe.safe, execViaSafe.signer),
+          wrapInExecTransaction(transferTx, execViaSafe.safe, execViaSafe.signer),
+        ];
+      } else {
+        txs = [borrowTx, transferTx];
       }
 
       await sendTransactions(txs);
@@ -793,9 +830,20 @@ function ActionSheet({
             {txError}
           </div>
         )}
-        <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
-          {submitting ? <Spinner /> : "Send to Circles wallet →"}
-        </PrimaryButton>
+        {!isRepay && cardSafeAddress ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
+              {submitting ? <Spinner /> : "Send to Circles wallet →"}
+            </PrimaryButton>
+            <PrimaryButton onClick={handleConfirmToCard} disabled={!canConfirm || isMax} style={{ background: "var(--brand)" }}>
+              {submitting ? <Spinner /> : "Top up card →"}
+            </PrimaryButton>
+          </div>
+        ) : (
+          <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
+            {submitting ? <Spinner /> : isRepay ? "Repay →" : "Send to Circles wallet →"}
+          </PrimaryButton>
+        )}
         {!submitting && canConfirm && (
           <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted-text)", marginTop: 8 }}>
             Circles will ask you to approve the transaction
@@ -1338,6 +1386,7 @@ function DashboardPage() {
                 ? { safe: selectedAddress as `0x${string}`, signer: address as `0x${string}` }
                 : undefined
             }
+            cardSafeAddress={cardSafeAddress}
           />
         </SheetContent>
       </Sheet>
