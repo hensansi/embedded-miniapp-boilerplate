@@ -824,6 +824,14 @@ function TopUpSheet({
   onSuccess: () => void;
 }) {
   const destination = defaultDestination ?? "";
+  const [cardBalance, setCardBalance] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (!destination.startsWith("0x") || destination.length !== 42) return;
+    fetchErc20Balance(eureAddress, destination as `0x${string}`)
+      .then(setCardBalance)
+      .catch(() => setCardBalance(null));
+  }, [destination, eureAddress]);
+
   const [amount, setAmount] = useState("");
   const [isMax, setIsMax] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -889,10 +897,26 @@ function TopUpSheet({
           </div>
         </div>
 
+        {/* Balances */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card wallet</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+              {cardBalance !== null ? `${fmtToken(Number(cardBalance) / 1e18, 18)} EURe` : "…"}
+            </div>
+          </div>
+          <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Available to send</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+              {fmtToken(balanceHuman, 18)} EURe
+            </div>
+          </div>
+        </div>
+
         {/* Amount */}
         <div>
           <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>
-            Amount — {fmtToken(balanceHuman, 18)} EURe available
+            Amount
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid var(--line)", borderRadius: 12, padding: "4px 4px 4px 16px" }}>
             <input
