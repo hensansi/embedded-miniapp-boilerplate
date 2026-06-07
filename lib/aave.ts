@@ -8,12 +8,15 @@ const POOL = '0xb50201558B00496A145fE76f7424749556E326D8' as const;
 const RAY = 10n ** 27n;
 const WAD = 10n ** 18n;
 
-const defaultClient = createPublicClient({
-  chain: gnosis,
-  transport: http('https://rpc.gnosischain.com'),
-});
+let _defaultClient: ReturnType<typeof createPublicClient> | undefined;
+function getDefaultClient() {
+  return (_defaultClient ??= createPublicClient({
+    chain: gnosis,
+    transport: http('https://rpc.gnosischain.com'),
+  }));
+}
 
-type AaveClient = Pick<typeof defaultClient, 'multicall'>;
+type AaveClient = Pick<ReturnType<typeof createPublicClient>, 'multicall'>;
 
 const UI_ABI = [
   {
@@ -149,9 +152,30 @@ export interface AavePosition {
   healthFactor: number;
 }
 
+const ERC20_BALANCE_ABI = [
+  {
+    inputs: [{ name: 'account', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export async function fetchErc20Balance(
+  token: `0x${string}`,
+  owner: `0x${string}`,
+  c: AaveClient = getDefaultClient(),
+): Promise<bigint> {
+  const result = await c.multicall({
+    contracts: [{ address: token, abi: ERC20_BALANCE_ABI, functionName: 'balanceOf', args: [owner] }],
+  });
+  return (result[0].status === 'success' ? result[0].result : 0n) as bigint;
+}
+
 export async function fetchAavePosition(
   user: `0x${string}`,
-  c: AaveClient = defaultClient,
+  c: AaveClient = getDefaultClient(),
 ): Promise<AavePosition> {
   const results = await c.multicall({
     contracts: [

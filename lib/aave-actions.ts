@@ -4,6 +4,8 @@ export const POOL = '0xb50201558B00496A145fE76f7424749556E326D8' as const;
 
 export const MAX_REPAY_AMOUNT = 2n ** 256n - 1n;
 
+const _zero = '0x0000000000000000000000000000000000000000' as const;
+
 const POOL_ABI = [
   {
     inputs: [
@@ -43,7 +45,28 @@ const ERC20_ABI = [
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  {
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    name: 'transfer',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;
+
+export function buildErc20TransferTx(
+  token: `0x${string}`,
+  to: `0x${string}`,
+  amount: bigint,
+): { to: `0x${string}`; data: `0x${string}` } {
+  return {
+    to: token,
+    data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [to, amount] }),
+  };
+}
 
 const SAFE_EXEC_ABI = [
   {
@@ -89,11 +112,13 @@ export function wrapInExecTransaction(
   };
 }
 
-// Selectors derived from the ABIs above — slice the first 4 bytes of encoded calldata
-const _zero = '0x0000000000000000000000000000000000000000' as const;
-export const SELECTOR_BORROW = encodeFunctionData({ abi: POOL_ABI, functionName: 'borrow', args: [_zero, 0n, 2n, 0, _zero] }).slice(0, 10) as `0x${string}`;
-export const SELECTOR_REPAY  = encodeFunctionData({ abi: POOL_ABI, functionName: 'repay',  args: [_zero, 0n, 2n, _zero] }).slice(0, 10) as `0x${string}`;
-export const SELECTOR_APPROVE = encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [_zero, 0n] }).slice(0, 10) as `0x${string}`;
+// Selectors derived from the ABIs above — computed lazily to avoid TDZ issues at module init time
+let _selectorBorrow: `0x${string}` | undefined;
+let _selectorRepay: `0x${string}` | undefined;
+let _selectorApprove: `0x${string}` | undefined;
+export function getSelectorBorrow(): `0x${string}` { return (_selectorBorrow ??= encodeFunctionData({ abi: POOL_ABI, functionName: 'borrow', args: [_zero, 0n, 2n, 0, _zero] }).slice(0, 10) as `0x${string}`); }
+export function getSelectorRepay(): `0x${string}` { return (_selectorRepay ??= encodeFunctionData({ abi: POOL_ABI, functionName: 'repay', args: [_zero, 0n, 2n, _zero] }).slice(0, 10) as `0x${string}`); }
+export function getSelectorApprove(): `0x${string}` { return (_selectorApprove ??= encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [_zero, 0n] }).slice(0, 10) as `0x${string}`); }
 
 export function buildBorrowTx(
   asset: `0x${string}`,

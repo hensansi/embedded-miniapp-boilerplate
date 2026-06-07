@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parseUnits } from "viem";
 import { useWallet } from "@/hooks/use-wallet";
 import {
   fetchAavePosition,
+  fetchErc20Balance,
   type AavePosition,
   type AssetPosition,
   type BorrowableAsset,
@@ -11,9 +12,11 @@ import {
 import {
   buildBorrowTx,
   buildRepayTx,
+  buildErc20TransferTx,
   wrapInExecTransaction,
   MAX_REPAY_AMOUNT,
 } from "@/lib/aave-actions";
+
 import {
   Sheet,
   SheetContent,
@@ -217,10 +220,12 @@ function OutlineButton({
   children,
   onClick,
   disabled,
+  style,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  style?: React.CSSProperties;
 }) {
   return (
     <button
@@ -239,6 +244,7 @@ function OutlineButton({
         transition: "opacity 0.15s",
         fontFamily: "inherit",
         whiteSpace: "nowrap",
+        ...style,
       }}
     >
       {children}
@@ -476,6 +482,7 @@ function ActionSheet({
   walletAddress,
   position,
   execViaSafe,
+  cardSafeAddress,
 }: {
   sheet: SheetState | null;
   onClose: () => void;
@@ -483,6 +490,7 @@ function ActionSheet({
   walletAddress: string;
   position: AavePosition | null;
   execViaSafe?: { safe: `0x${string}`; signer: `0x${string}` };
+  cardSafeAddress?: string | null;
 }) {
   const [input, setInput] = useState("");
   const [isMax, setIsMax] = useState(false);
@@ -497,23 +505,36 @@ function ActionSheet({
     }
   }, [sheet]);
 
-  if (!sheet) return null;
-
-  const isRepay = sheet.type === "repay";
-  const asset = sheet.asset;
-  const decimals = asset.decimals;
+  // Derive values with null-safe guards so they can live before the early return
+  // (hooks must not be called conditionally, so useMemo must precede `if (!sheet) return null`)
+  const isRepay = sheet?.type === "repay";
+  const asset = sheet?.asset ?? null;
+  const decimals = asset?.decimals ?? 18;
 
   const maxRaw = isRepay
-    ? (asset as AssetPosition).amount
-    : (asset as BorrowableAsset).maxAmount;
+    ? (asset as AssetPosition | null)?.amount ?? 0
+    : (asset as BorrowableAsset | null)?.maxAmount ?? 0;
 
   const maxEur = isRepay
-    ? (asset as AssetPosition).amountEur
-    : (asset as BorrowableAsset).maxAmountEur;
+    ? (asset as AssetPosition | null)?.amountEur ?? 0
+    : (asset as BorrowableAsset | null)?.maxAmountEur ?? 0;
 
   const parsedInput = parseFloat(input) || 0;
   const eurPerUnit = maxRaw > 0 ? maxEur / maxRaw : 0;
   const eurEquiv = parsedInput * eurPerUnit;
+  const canConfirm = (isMax || parsedInput > 0) && !submitting;
+
+  const previewTxs = useMemo((): { to: `0x${string}`; data: `0x${string}` }[] => {
+    if (!canConfirm || !asset) return [];
+    const addr = walletAddress as `0x${string}`;
+    if (isRepay) {
+      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
+      return buildRepayTx((asset as AssetPosition).address, amountWei, addr);
+    }
+    return buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
+  }, [canConfirm, isRepay, isMax, input, decimals, walletAddress, asset]);
+
+  if (!sheet || !asset) return null;
 
   // Plain decimal string so number inputs parse it correctly (no locale commas)
   function toInputStr(n: number): string {
@@ -571,7 +592,41 @@ function ActionSheet({
     }
   }
 
-  const canConfirm = (isMax || parsedInput > 0) && !submitting;
+  async function handleConfirmToCard() {
+    if ((!input && !isMax) || !cardSafeAddress || isRepay) return;
+    setSubmitting(true);
+    setTxError(null);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const addr = walletAddress as `0x${string}`;
+      const amountWei = parseUnits(input, decimals);
+      const borrowTx = buildBorrowTx((asset as BorrowableAsset).address, amountWei, addr)[0];
+      const transferTx = buildErc20TransferTx(
+        (asset as BorrowableAsset).address,
+        cardSafeAddress as `0x${string}`,
+        amountWei,
+      );
+
+      let txs: { to: `0x${string}`; data: `0x${string}` }[];
+      if (execViaSafe) {
+        txs = [
+          wrapInExecTransaction(borrowTx, execViaSafe.safe, execViaSafe.signer),
+          wrapInExecTransaction(transferTx, execViaSafe.safe, execViaSafe.signer),
+        ];
+      } else {
+        txs = [borrowTx, transferTx];
+      }
+
+      await sendTransactions(txs);
+      onClose();
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const title = isRepay ? `Repay ${asset.symbol}` : `Borrow ${asset.symbol}`;
   const subtitle = isRepay
     ? `Current debt: €${fmtEur(maxEur)}`
@@ -591,21 +646,8 @@ function ActionSheet({
     }
   }
 
-  // Build the actual transactions so calldata shown matches exactly what will be submitted
-  let previewTxs: { to: `0x${string}`; data: `0x${string}` }[] = [];
-  if (canConfirm) {
-    const addr = walletAddress as `0x${string}`;
-    if (isRepay) {
-      const amountWei = isMax ? MAX_REPAY_AMOUNT : parseUnits(input, decimals);
-      previewTxs = buildRepayTx((asset as AssetPosition).address, amountWei, addr);
-    } else {
-      previewTxs = buildBorrowTx((asset as BorrowableAsset).address, parseUnits(input, decimals), addr);
-    }
-  }
-
   return (
     <>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <SheetHeader style={{ padding: "20px 20px 0" }}>
         <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>
           {title}
@@ -742,7 +784,7 @@ function ActionSheet({
             {/* Divider */}
             <div style={{ borderTop: "1px solid var(--line)", margin: "10px 0 10px" }} />
 
-            {/* Decoded transactions — parameters we passed when building the txs */}
+            {/* Decoded transactions */}
             <div style={{ fontSize: 11, lineHeight: 1.8 }}>
               {isRepay ? (
                 <>
@@ -753,7 +795,6 @@ function ActionSheet({
                   <TxRow label="Tx 2 — Aave Pool repay" contract={previewTxs[1]?.to ?? ""} fn="repay(asset, amount, rateMode, onBehalfOf)" params={[
                     { name: "asset", value: `${asset.symbol} (${asset.address})` },
                     { name: "amount", value: isMax ? "max (full debt + accrued interest)" : `${input} ${asset.symbol}` },
-                    { name: "rateMode", value: "2 — variable rate" },
                     { name: "onBehalfOf", value: walletAddress },
                   ]} />
                 </>
@@ -761,8 +802,6 @@ function ActionSheet({
                 <TxRow label="Tx 1 — Aave Pool borrow" contract={previewTxs[0]?.to ?? ""} fn="borrow(asset, amount, rateMode, referral, onBehalfOf)" params={[
                   { name: "asset", value: `${asset.symbol} (${asset.address})` },
                   { name: "amount", value: `${input} ${asset.symbol}` },
-                  { name: "rateMode", value: "2 — variable rate" },
-                  { name: "referralCode", value: "0" },
                   { name: "onBehalfOf", value: walletAddress },
                 ]} />
               )}
@@ -786,14 +825,176 @@ function ActionSheet({
             {txError}
           </div>
         )}
-        <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
-          {submitting ? <Spinner /> : "Send to Circles wallet →"}
-        </PrimaryButton>
+        {!isRepay ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
+              {submitting ? <Spinner /> : "Send to Circles wallet →"}
+            </PrimaryButton>
+            <PrimaryButton onClick={handleConfirmToCard} disabled={!canConfirm || isMax || !cardSafeAddress}>
+              {submitting ? <Spinner /> : "Top up card →"}
+            </PrimaryButton>
+          </div>
+        ) : (
+          <PrimaryButton onClick={handleConfirm} disabled={!canConfirm}>
+            {submitting ? <Spinner /> : "Repay →"}
+          </PrimaryButton>
+        )}
         {!submitting && canConfirm && (
           <div style={{ textAlign: "center", fontSize: 11, color: "var(--muted-text)", marginTop: 8 }}>
             Circles will ask you to approve the transaction
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+// ─── Top Up sheet ────────────────────────────────────────────────────────────
+
+function TopUpSheet({
+  safeAddress,
+  signerAddress,
+  eureBalance,
+  eureAddress,
+  defaultDestination,
+  onSuccess,
+}: {
+  safeAddress: `0x${string}`;
+  signerAddress: `0x${string}`;
+  eureBalance: bigint;
+  eureAddress: `0x${string}`;
+  defaultDestination?: string;
+  onSuccess: () => void;
+}) {
+  const [destination, setDestination] = useState(defaultDestination ?? "");
+  useEffect(() => {
+    setDestination(defaultDestination ?? "");
+  }, [defaultDestination]);
+
+  const [cardBalance, setCardBalance] = useState<bigint | null>(null);
+  useEffect(() => {
+    if (!destination.startsWith("0x") || destination.length !== 42) return;
+    fetchErc20Balance(eureAddress, destination as `0x${string}`)
+      .then(setCardBalance)
+      .catch(() => setCardBalance(null));
+  }, [destination, eureAddress]);
+
+  const [amount, setAmount] = useState("");
+  const [isMax, setIsMax] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+
+  const balanceHuman = Number(eureBalance) / 1e18;
+  const parsedAmount = parseFloat(amount) || 0;
+  const amountWei = isMax ? eureBalance : parseUnits(amount || "0", 18);
+  const canConfirm =
+    destination.startsWith("0x") &&
+    destination.length === 42 &&
+    (isMax || parsedAmount > 0) &&
+    !submitting;
+
+  function handleMax() {
+    setAmount((Math.floor(balanceHuman * 100) / 100).toFixed(2));
+    setIsMax(true);
+  }
+
+  async function handleConfirm() {
+    if (!canConfirm) return;
+    setSubmitting(true);
+    setTxError(null);
+    try {
+      const { sendTransactions } = await import("@aboutcircles/miniapp-sdk");
+      const inner = buildErc20TransferTx(eureAddress, destination as `0x${string}`, amountWei);
+      const tx = wrapInExecTransaction(inner, safeAddress, signerAddress);
+      await sendTransactions([tx]);
+      onSuccess();
+    } catch (e) {
+      setTxError(e instanceof Error ? e.message : "Transaction failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <>
+      <SheetHeader style={{ padding: "20px 20px 0" }}>
+        <SheetTitle style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>Top Up</SheetTitle>
+        <SheetDescription style={{ color: "var(--muted-text)", fontSize: 13 }}>
+          Transfer EURe from this safe to another address
+        </SheetDescription>
+      </SheetHeader>
+
+      <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Destination */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>Card safe address</div>
+          <div style={{
+            width: "100%",
+            fontSize: 12,
+            fontFamily: "monospace",
+            border: "1px solid var(--line)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            background: "var(--surface-muted, #f8f8f8)",
+            color: "var(--ink)",
+            boxSizing: "border-box",
+            wordBreak: "break-all",
+          }}>
+            {destination || "—"}
+          </div>
+        </div>
+
+        {/* Balances */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Card wallet</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+              {cardBalance !== null ? `${fmtToken(Number(cardBalance) / 1e18, 18)} EURe` : "…"}
+            </div>
+          </div>
+          <div style={{ flex: 1, background: "var(--accent-soft)", borderRadius: 10, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "var(--muted-text)", marginBottom: 2 }}>Available to send</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+              {fmtToken(balanceHuman, 18)} EURe
+            </div>
+          </div>
+        </div>
+
+        {/* Amount */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--muted-text)", marginBottom: 6 }}>
+            Amount
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", border: "1px solid var(--line)", borderRadius: 12, padding: "4px 4px 4px 16px" }}>
+            <input
+              type="number"
+              min="0"
+              value={amount}
+              onChange={(e) => { setAmount(e.target.value); setIsMax(false); }}
+              placeholder="0.00"
+              style={{ flex: 1, fontSize: 28, fontWeight: 600, border: "none", outline: "none", background: "transparent", color: "var(--ink)", fontFamily: "inherit", minWidth: 0 }}
+            />
+            <button
+              onClick={handleMax}
+              style={{ background: "var(--accent-soft)", color: "var(--accent-brand)", border: "none", borderRadius: "var(--radius-pill)", padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
+            >MAX</button>
+          </div>
+        </div>
+
+
+        {txError && (
+          <div style={{ background: "#fee2e2", color: "#7f1d1d", fontSize: 13, padding: "10px 14px", borderRadius: 10 }}>
+            {txError}
+          </div>
+        )}
+
+        <OutlineButton
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+          style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 15, fontWeight: 700 }}
+        >
+          {submitting ? "Sending…" : "Confirm Top Up"}
+        </OutlineButton>
       </div>
     </>
   );
@@ -806,12 +1007,17 @@ function DashboardPage() {
   const [ownedSafes, setOwnedSafes] = useState<string[]>([]);
   const [safesLoading, setSafesLoading] = useState(false);
   const [safesLoaded, setSafesLoaded] = useState(false);
+  const safesLoadingRef = useRef(false);
   const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
   const [position, setPosition] = useState<AavePosition | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [isOwnerOfSelected, setIsOwnerOfSelected] = useState(false);
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [eureWalletBalance, setEureWalletBalance] = useState<bigint | null>(null);
+  const [cardSafeAddress, setCardSafeAddress] = useState<string | null>(null);
+  const [cardSafeBalance, setCardSafeBalance] = useState<bigint | null>(null);
 
   const activeAddress = selectedAddress ?? address;
 
@@ -821,7 +1027,47 @@ function DashboardPage() {
     setOwnedSafes([]);
     setSafesLoaded(false);
     setIsOwnerOfSelected(false);
+    setEureWalletBalance(null);
+    setCardSafeAddress(null);
+    setCardSafeBalance(null);
   }, [address]);
+
+  // Declare callbacks before the effects that reference them (avoids TDZ in the minified bundle)
+  const loadSiblingsSafes = useCallback(async () => {
+    if (!address || safesLoaded || safesLoadingRef.current) return;
+    safesLoadingRef.current = true;
+    setSafesLoading(true);
+    const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
+    try {
+      const res = await fetch(`${BASE}/owners/${address}/safes/`)
+        .then((r) => r.json()).catch(() => ({ safes: [] }));
+      const safes: string[] = (res.safes ?? []).filter((s: string) => s !== address);
+      setOwnedSafes(safes);
+    } finally {
+      safesLoadingRef.current = false;
+      setSafesLoading(false);
+      setSafesLoaded(true);
+    }
+  }, [address, safesLoaded]);
+
+  const loadPosition = useCallback(async () => {
+    if (!activeAddress) return;
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const pos = await fetchAavePosition(activeAddress as `0x${string}`);
+      setPosition(pos);
+    } catch (e) {
+      setFetchError(e instanceof Error ? e.message : "Failed to load position");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeAddress]);
+
+  // Eager-load safes as soon as wallet connects
+  useEffect(() => {
+    loadSiblingsSafes();
+  }, [loadSiblingsSafes]);
 
   // Check if the Circles safe is an owner of the selected sibling safe
   useEffect(() => {
@@ -840,45 +1086,71 @@ function DashboardPage() {
       .catch(() => setIsOwnerOfSelected(false));
   }, [selectedAddress, address]);
 
-  // Lazy-load safes where the Circles safe is itself listed as an owner
-  const loadSiblingsSafes = useCallback(async () => {
-    if (!address || safesLoaded || safesLoading) return;
-    setSafesLoading(true);
-    const BASE = 'https://api.safe.global/tx-service/gno/api/v1';
-    try {
-      const res = await fetch(`${BASE}/owners/${address}/safes/`)
-        .then((r) => r.json()).catch(() => ({ safes: [] }));
-      const safes: string[] = (res.safes ?? []).filter((s: string) => s !== address);
-      setOwnedSafes(safes);
-    } finally {
-      setSafesLoading(false);
-      setSafesLoaded(true);
-    }
-  }, [address, safesLoaded, safesLoading]);
-
-  const loadPosition = useCallback(async () => {
-    if (!activeAddress) return;
-    setLoading(true);
-    setFetchError(null);
-    try {
-      const pos = await fetchAavePosition(activeAddress as `0x${string}`);
-      setPosition(pos);
-    } catch (e) {
-      setFetchError(e instanceof Error ? e.message : "Failed to load position");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeAddress]);
-
   useEffect(() => {
     loadPosition();
   }, [loadPosition]);
 
-  const allSafes = address ? [address, ...ownedSafes] : [];
+  // EURe asset — derived from position, memoized to avoid repeated .find() scans
+  const eureAsset = useMemo(() => {
+    if (!position) return null;
+    return (
+      position.borrows.find((b) => b.symbol === 'EURe') ??
+      position.borrowable.find((b) => b.symbol === 'EURe') ??
+      position.supplies.find((b) => b.symbol === 'EURe') ??
+      null
+    );
+  }, [position]);
+
+  const allSafes = useMemo(
+    () => (address ? [address, ...ownedSafes] : []),
+    [address, ownedSafes],
+  );
   // Borrow/repay are available when:
   // - viewing own address, OR
   // - viewing a sibling safe where the Circles safe is an owner (nested execTransaction)
   const canTransact = !selectedAddress || selectedAddress === address || isOwnerOfSelected;
+
+  // Fetch EURe wallet balance of the active safe whenever position or address changes
+  useEffect(() => {
+    if (!activeAddress || !eureAsset) { setEureWalletBalance(null); return; }
+    fetchErc20Balance(eureAsset.address as `0x${string}`, activeAddress as `0x${string}`)
+      .then(setEureWalletBalance)
+      .catch(() => setEureWalletBalance(null));
+  }, [activeAddress, eureAsset]);
+
+  // Discover card safe via HyperIndex: signer EOA → DelayModuleOwner → card safe
+  useEffect(() => {
+    if (!address) { setCardSafeAddress(null); return; }
+    fetch("https://indexer.eu.hyperindex.xyz/00dfbaf/v1/graphql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query payOwners($address: String) {
+          Metri_Pay_DelayModuleOwner(where: {ownerAddress: {_eq: $address}}) {
+            delayModule { safeAddress }
+          }
+        }`,
+        variables: { address },
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const entries: { delayModule: { safeAddress: string } }[] =
+          data?.data?.Metri_Pay_DelayModuleOwner ?? [];
+        if (entries.length > 0) {
+          setCardSafeAddress(entries[entries.length - 1].delayModule.safeAddress);
+        }
+      })
+      .catch(() => {});
+  }, [address]);
+
+  // Fetch card safe EURe balance
+  useEffect(() => {
+    if (!cardSafeAddress || !eureAsset) { setCardSafeBalance(null); return; }
+    fetchErc20Balance(eureAsset.address as `0x${string}`, cardSafeAddress as `0x${string}`)
+      .then(setCardSafeBalance)
+      .catch(() => setCardSafeBalance(null));
+  }, [cardSafeAddress, eureAsset]);
 
   // ── Not connected ─────────────────────────────────────────────────────────
   if (!isConnected) {
@@ -902,9 +1174,9 @@ function DashboardPage() {
   if (loading && !position) {
     return (
       <div style={{ maxWidth: 480, margin: "0 auto", display: "flex", flexDirection: "column", gap: 12 }}>
-        {[120, 200, 160].map((h, i) => (
+        {[120, 200, 160].map((h) => (
           <div
-            key={i}
+            key={h}
             style={{
               height: h,
               background: "#ffffff",
@@ -988,32 +1260,29 @@ function DashboardPage() {
           )}
         </Card>
 
-        {/* ── Your borrows ──────────────────────────────────────────────── */}
-        <div>
-          <SectionLabel>Your Borrows</SectionLabel>
-          <Card>
-            {position.borrows.length === 0 ? (
-              <div
-                style={{
-                  padding: "20px",
-                  color: "var(--muted-text)",
-                  fontSize: 14,
-                  textAlign: "center",
-                }}
-              >
-                No open borrows
+        {/* ── Card wallet ───────────────────────────────────────────────── */}
+        {isOwnerOfSelected && cardSafeAddress && (
+          <div>
+            <SectionLabel>Card Wallet</SectionLabel>
+            <Card>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px" }}>
+                <TokenIcon symbol="EURe" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>EURe</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-text)" }}>
+                    {cardSafeBalance !== null
+                      ? `${fmtToken(Number(cardSafeBalance) / 1e18, 18)} EURe on card`
+                      : "loading…"}
+                  </div>
+                </div>
+                <OutlineButton
+                  onClick={() => setTopupOpen(true)}
+                  disabled={!eureWalletBalance || eureWalletBalance === 0n}
+                >Top Up</OutlineButton>
               </div>
-            ) : (
-              position.borrows.map((b) => (
-                <BorrowRow
-                  key={b.address}
-                  asset={b}
-                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
-                />
-              ))
-            )}
-          </Card>
-        </div>
+            </Card>
+          </div>
+        )}
 
         {/* ── Available to borrow ───────────────────────────────────────── */}
         <div>
@@ -1044,6 +1313,33 @@ function DashboardPage() {
           </Card>
         </div>
 
+        {/* ── Your borrows ──────────────────────────────────────────────── */}
+        <div>
+          <SectionLabel>Your Borrows</SectionLabel>
+          <Card>
+            {position.borrows.length === 0 ? (
+              <div
+                style={{
+                  padding: "20px",
+                  color: "var(--muted-text)",
+                  fontSize: 14,
+                  textAlign: "center",
+                }}
+              >
+                No open borrows
+              </div>
+            ) : (
+              position.borrows.map((b) => (
+                <BorrowRow
+                  key={b.address}
+                  asset={b}
+                  onRepay={canTransact ? () => setSheet({ type: "repay", asset: b }) : undefined}
+                />
+              ))
+            )}
+          </Card>
+        </div>
+
         {/* ── Read-only notice ──────────────────────────────────────────── */}
         {selectedAddress && selectedAddress !== address && !isOwnerOfSelected && (
           <div style={{
@@ -1065,7 +1361,7 @@ function DashboardPage() {
         open={sheet !== null}
         onOpenChange={(open: boolean) => { if (!open) setSheet(null); }}
       >
-        <SheetContent side="bottom" showCloseButton>
+        <SheetContent side="bottom" showCloseButton style={{ maxHeight: "85vh", overflowY: "auto" }}>
           <ActionSheet
             sheet={sheet}
             onClose={() => setSheet(null)}
@@ -1077,9 +1373,30 @@ function DashboardPage() {
                 ? { safe: selectedAddress as `0x${string}`, signer: address as `0x${string}` }
                 : undefined
             }
+            cardSafeAddress={cardSafeAddress}
           />
         </SheetContent>
       </Sheet>
+
+      {/* ── Top Up sheet ──────────────────────────────────────────────────── */}
+      <Sheet
+        open={topupOpen}
+        onOpenChange={(open: boolean) => { if (!open) setTopupOpen(false); }}
+      >
+        <SheetContent side="bottom" showCloseButton>
+          {isOwnerOfSelected && selectedAddress && address && eureWalletBalance !== null && eureAsset && (
+            <TopUpSheet
+              safeAddress={selectedAddress as `0x${string}`}
+              signerAddress={address as `0x${string}`}
+              eureBalance={eureWalletBalance}
+              eureAddress={eureAsset.address as `0x${string}`}
+              defaultDestination={cardSafeAddress ?? ""}
+              onSuccess={() => { setTopupOpen(false); loadPosition(); }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
+
     </>
   );
 }
